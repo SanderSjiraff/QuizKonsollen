@@ -3,6 +3,47 @@ import type { Screen, Player, Question, GameMode } from '../types';
 import { DEFAULT_PLAYERS, QUESTIONS } from '../data/mockData';
 import { saveQuizHistory } from '../data/quizHistory';
 
+const USED_QUESTIONS_KEY = 'quizkrets_used_question_ids';
+const CACHE_KEY = 'quizkrets_otdb_cache';
+
+// Hent brukte spørsmåls-IDer
+function getUsedQuestionIds(): Set<string> {
+  try {
+    const data = localStorage.getItem(USED_QUESTIONS_KEY);
+    if (!data) return new Set();
+    return new Set(JSON.parse(data));
+  } catch {
+    return new Set();
+  }
+}
+
+// Lagre brukte spørsmåls-IDer
+function saveUsedQuestionIds(ids: Set<string>) {
+  try {
+    localStorage.setItem(USED_QUESTIONS_KEY, JSON.stringify([...ids]));
+  } catch (error) {
+    console.error('Kunne ikke lagre brukte spørsmål:', error);
+  }
+}
+
+// Hent cached spørsmål fra API
+function getCachedQuestions(): Question[] {
+  try {
+    const data = localStorage.getItem(CACHE_KEY);
+    if (!data) return [];
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+// Hent ALLE tilgjengelige spørsmål (lokale + cached + mock)
+function getAllAvailableQuestions(): Question[] {
+  const cached = getCachedQuestions();
+  // Kombiner med lokale spørsmål
+  return [...QUESTIONS, ...cached];
+}
+
 export interface GameConfig {
   selectedCategories: string[];
   selectedDifficulties: string[];
@@ -50,14 +91,49 @@ export function useGameEngine() {
     if (customQuestions && customQuestions.length > 0) {
       selected = customQuestions;
     } else {
-      const filtered = QUESTIONS.filter(q => {
-        const catMatch = config.selectedCategories.length === 0 || 
-          q.categories.some(c => config.selectedCategories.includes(c));
-        const diffMatch = config.selectedDifficulties.includes(q.difficulty);
-        return catMatch && diffMatch;
-      });
-      const shuffled = [...filtered].sort(() => Math.random() - 0.5);
-      selected = shuffled.slice(0, Math.min(config.questionCount, shuffled.length));
+      // Hent ALLE tilgjengelige spørsmål
+      const allQuestions = getAllAvailableQuestions();
+      
+      // Hent brukte spørsmåls-IDer
+      const currentUsedIds = getUsedQuestionIds();
+      
+      // Filtrer ut brukte spørsmål
+      const unusedQuestions = allQuestions.filter(q => !currentUsedIds.has(q.id));
+      
+      // Hvis det er færre ubrukte spørsmål enn ønsket, gi advarsel
+      const availableCount = unusedQuestions.length;
+      
+      if (availableCount < 5) {
+        // Nesten ingen ubrukte spørsmål - tilbakestill brukte spørsmål
+        localStorage.removeItem(USED_QUESTIONS_KEY);
+        // Bruk alle spørsmål
+        const freshUnused = [...allQuestions].sort(() => Math.random() - 0.5);
+        selected = freshUnused.slice(0, Math.min(config.questionCount, freshUnused.length));
+      } else {
+        // Filtrer etter kategorier og vanskelighet
+        let filtered = unusedQuestions;
+        
+        if (config.selectedCategories.length > 0) {
+          filtered = filtered.filter(q => 
+            q.categories.some(c => config.selectedCategories.includes(c))
+          );
+        }
+        
+        if (config.selectedDifficulties.length > 0) {
+          filtered = filtered.filter(q => 
+            config.selectedDifficulties.includes(q.difficulty)
+          );
+        }
+        
+        // Hvis for få etter filtrering, bruk alle ubrukte
+        if (filtered.length < config.questionCount) {
+          filtered = unusedQuestions;
+        }
+        
+        // Shuffle og ta ønsket antall
+        const shuffled = [...filtered].sort(() => Math.random() - 0.5);
+        selected = shuffled.slice(0, Math.min(config.questionCount, shuffled.length));
+      }
     }
 
     setQuestions(selected);
@@ -86,11 +162,18 @@ export function useGameEngine() {
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else {
-      // Lagre quiz-historikk
+      // Lagre quiz-historikk og marker spørsmål som brukt
+      
+      // Lagre brukte spørsmål
+      const currentUsedIds = getUsedQuestionIds();
+      const newUsedIds = new Set(currentUsedIds);
+      questions.forEach(q => newUsedIds.add(q.id));
+      saveUsedQuestionIds(newUsedIds);
+      
       saveQuizHistory({
         id: `quiz-${Date.now()}`,
         date: new Date().toISOString(),
-        quizName: 'Quiz', // TODO: Hent navn fra config
+        quizName: 'Quiz',
         mode: config.gameMode,
         players: config.players.map(p => ({
           id: p.id,
@@ -99,11 +182,11 @@ export function useGameEngine() {
           color: p.color,
         })),
         totalQuestions: questions.length,
-        duration: 0, // TODO: Implementer timer
+        duration: 0,
       });
       setScreen('results');
     }
-  }, [currentQuestionIndex, questions.length, config, scores]);
+  }, [currentQuestionIndex, questions.length, config, scores, questions]);
 
   const resetGame = useCallback(() => {
     setScreen('main-menu');

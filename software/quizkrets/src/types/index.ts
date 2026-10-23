@@ -10,7 +10,8 @@ export type Screen =
   | 'settings'
   | 'scoreboard'
   | 'import-questions'
-  | 'question-sources';
+  | 'question-sources'
+  | 'fetch-from-api';
 
 export type Difficulty = 'lett' | 'middels' | 'vanskelig';
 

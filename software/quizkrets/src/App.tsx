@@ -10,6 +10,7 @@ import Results from './pages/Results';
 import QuestionBank from './pages/QuestionBank';
 import Scoreboard from './pages/Scoreboard';
 import ImportQuestions from './pages/ImportQuestions';
+import FetchFromAPI from './pages/FetchFromAPI';
 import QuestionSources from './pages/QuestionSources';
 import { saveQuizPreset } from './data/savedQuizzes';
 import type { Question } from './types';
@@ -80,7 +81,7 @@ function App() {
               game.startGame(questions);
             }}
             onScoreboard={() => game.navigateTo('scoreboard')}
-            onImportQuestions={() => game.navigateTo('import-questions')}
+            onImportQuestions={() => game.navigateTo('fetch-from-api')}
           />
         );
       case 'scoreboard':
@@ -129,6 +130,13 @@ function App() {
         return <QuestionBank onBack={() => game.navigateTo('main-menu')} />;
       case 'question-sources':
         return <QuestionSources onBack={() => game.navigateTo('main-menu')} />;
+      case 'fetch-from-api':
+        return <FetchFromAPI onBack={() => game.navigateTo('game-setup')} onImportComplete={(questions) => {
+          // Legg til i spørsmålsbanken
+          const existing = JSON.parse(localStorage.getItem('quizkrets_imported_questions') || '[]');
+          localStorage.setItem('quizkrets_imported_questions', JSON.stringify([...existing, ...questions]));
+          game.navigateTo('question-bank');
+        }} />;
       default:
         return <MainMenu onNavigate={game.navigateTo} />;
     }
