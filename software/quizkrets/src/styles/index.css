@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Righteous&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Poppins', sans-serif;
+    background-color: #0F172A;
+    color: #F8FAFC;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Righteous', cursive;
+  }
+
+  *:focus-visible {
+    outline: 3px solid #F59E0B;
+    outline-offset: 2px;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline: 3px solid #F59E0B;
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-bg-primary font-semibold px-8 py-4 rounded-2xl 
+           transition-all duration-300 hover:bg-primary-hover 
+           hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] active:translate-y-0.5
+           disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-transparent border-2 border-border text-text-primary font-semibold 
+           px-8 py-4 rounded-2xl transition-all duration-300 
+           hover:border-primary hover:text-primary active:translate-y-0.5;
+  }
+
+  .card {
+    @apply bg-bg-secondary border border-border rounded-3xl p-6 
+           transition-all duration-300 hover:border-primary/50;
+  }
+
+  .card-interactive {
+    @apply card cursor-pointer hover:bg-bg-elevated;
+  }
+
+  .tv-text {
+    @apply text-2xl md:text-3xl lg:text-4xl;
+  }
+
+  .tv-heading {
+    @apply text-4xl md:text-5xl lg:text-6xl font-display;
+  }
+
+  .player-glow-1 { @apply shadow-[0_0_20px_rgba(59,130,246,0.4)]; }
+  .player-glow-2 { @apply shadow-[0_0_20px_rgba(239,68,68,0.4)]; }
+  .player-glow-3 { @apply shadow-[0_0_20px_rgba(34,197,94,0.4)]; }
+  .player-glow-4 { @apply shadow-[0_0_20px_rgba(245,158,11,0.4)]; }
+}
+
+@layer utilities {
+  .text-glow-primary {
+    text-shadow: 0 0 10px rgba(245, 158, 11, 0.5), 0 0 20px rgba(245, 158, 11, 0.3);
+  }
+  
+  .text-glow-success {
+    text-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+  }
+  
+  .text-glow-error {
+    text-shadow: 0 0 10px rgba(220, 38, 38, 0.5);
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
