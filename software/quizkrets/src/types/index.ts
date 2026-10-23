@@ -7,7 +7,10 @@ export type Screen =
   | 'game-play'
   | 'results'
   | 'question-bank'
-  | 'settings';
+  | 'settings'
+  | 'scoreboard'
+  | 'import-questions'
+  | 'question-sources';
 
 export type Difficulty = 'lett' | 'middels' | 'vanskelig';
 

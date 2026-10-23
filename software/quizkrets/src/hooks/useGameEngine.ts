@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { Screen, Player, Question, GameMode } from '../types';
 import { DEFAULT_PLAYERS, QUESTIONS } from '../data/mockData';
+import { saveQuizHistory } from '../data/quizHistory';
 
 export interface GameConfig {
   selectedCategories: string[];
@@ -43,16 +44,21 @@ export function useGameEngine() {
     }));
   }, []);
 
-  const startGame = useCallback(() => {
-    const filtered = QUESTIONS.filter(q => {
-      const catMatch = config.selectedCategories.length === 0 || 
-        q.categories.some(c => config.selectedCategories.includes(c));
-      const diffMatch = config.selectedDifficulties.includes(q.difficulty);
-      return catMatch && diffMatch;
-    });
-
-    const shuffled = [...filtered].sort(() => Math.random() - 0.5);
-    const selected = shuffled.slice(0, Math.min(config.questionCount, shuffled.length));
+  const startGame = useCallback((customQuestions?: Question[]) => {
+    let selected: Question[];
+    
+    if (customQuestions && customQuestions.length > 0) {
+      selected = customQuestions;
+    } else {
+      const filtered = QUESTIONS.filter(q => {
+        const catMatch = config.selectedCategories.length === 0 || 
+          q.categories.some(c => config.selectedCategories.includes(c));
+        const diffMatch = config.selectedDifficulties.includes(q.difficulty);
+        return catMatch && diffMatch;
+      });
+      const shuffled = [...filtered].sort(() => Math.random() - 0.5);
+      selected = shuffled.slice(0, Math.min(config.questionCount, shuffled.length));
+    }
 
     setQuestions(selected);
     setCurrentQuestionIndex(0);
@@ -80,9 +86,24 @@ export function useGameEngine() {
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else {
+      // Lagre quiz-historikk
+      saveQuizHistory({
+        id: `quiz-${Date.now()}`,
+        date: new Date().toISOString(),
+        quizName: 'Quiz', // TODO: Hent navn fra config
+        mode: config.gameMode,
+        players: config.players.map(p => ({
+          id: p.id,
+          name: p.name,
+          score: scores[p.id] || 0,
+          color: p.color,
+        })),
+        totalQuestions: questions.length,
+        duration: 0, // TODO: Implementer timer
+      });
       setScreen('results');
     }
-  }, [currentQuestionIndex, questions.length]);
+  }, [currentQuestionIndex, questions.length, config, scores]);
 
   const resetGame = useCallback(() => {
     setScreen('main-menu');

@@ -8,7 +8,11 @@ import Lobby from './pages/Lobby';
 import GamePlay from './pages/GamePlay';
 import Results from './pages/Results';
 import QuestionBank from './pages/QuestionBank';
+import Scoreboard from './pages/Scoreboard';
+import ImportQuestions from './pages/ImportQuestions';
+import QuestionSources from './pages/QuestionSources';
 import { saveQuizPreset } from './data/savedQuizzes';
+import type { Question } from './types';
 
 function App() {
   const game = useGameEngine();
@@ -72,7 +76,20 @@ function App() {
             config={game.config}
             updateConfig={game.updateConfig}
             onBack={() => game.navigateTo('main-menu')}
-            onStart={() => game.startGame()}
+            onStart={(questions: Question[]) => {
+              game.startGame(questions);
+            }}
+            onScoreboard={() => game.navigateTo('scoreboard')}
+            onImportQuestions={() => game.navigateTo('import-questions')}
+          />
+        );
+      case 'scoreboard':
+        return <Scoreboard onBack={() => game.navigateTo('game-setup')} />;
+      case 'import-questions':
+        return (
+          <ImportQuestions
+            onBack={() => game.navigateTo('game-setup')}
+            onImportComplete={() => game.navigateTo('game-setup')}
           />
         );
       case 'lobby':
@@ -81,7 +98,7 @@ function App() {
             players={game.config.players}
             updatePlayer={game.updatePlayer}
             onStart={game.startGameplay}
-            onBack={() => game.navigateTo('quiz-builder')}
+            onBack={() => game.navigateTo('game-setup')}
           />
         );
       case 'game-play':
@@ -110,6 +127,8 @@ function App() {
         );
       case 'question-bank':
         return <QuestionBank onBack={() => game.navigateTo('main-menu')} />;
+      case 'question-sources':
+        return <QuestionSources onBack={() => game.navigateTo('main-menu')} />;
       default:
         return <MainMenu onNavigate={game.navigateTo} />;
     }
