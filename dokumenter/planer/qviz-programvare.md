@@ -305,6 +305,8 @@ Nettverk	Offline først	Valgfri synkronisering/online senere
 Lyd og lys	Grensesnitt klart for effekter	Antall LED-er og lydmaskinvare
 AI-spørsmål	Manuell vurdering før godkjenning	Automatisk assistanse senere
 
+Inplementasjoner til senere er en dagens qviz hvor man får en qviz per dag og kan samenligne sog mot andre og ha et leaderboard for det. Til senere også ha timer på det slik at det skal være vanskligere å jukse også legge til et system som sjekker om noen har koblet ai til det ved å sjekke riktig svar hastighet osv. 
+
 
 14. Første konkrete oppgave til Codex CLI
 Opprett en minimal monorepo for Quiz Universe med Python/FastAPI-backend, React/TypeScript-frontend og SQLite. Implementer først en ren Python-spillmotor med en enkel tilstandsmaskin, fire spillere, lokal spørsmålsbank, flervalg via tastatur, poengberegning og en komplett kampflyt fra lobby til resultatskjerm. Hold fysisk maskinvare utenfor spillmotoren; definer et grensesnitt for framtidige PLAYER_BUZZ og ANSWER_CHOICE-hendelser. Skriv tester og en README med eksakte lokale oppstartskommandoer. Les docs/01_QUIZ_PROGRAMVARE.md og docs/02_QUIZ_ELEKTRONIKK.md og implementer bare fase 1 – ikke bygg sky, kontoer eller avanserte funksjoner ennå.
