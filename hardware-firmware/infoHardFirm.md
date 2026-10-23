@@ -1,0 +1,1 @@
+# Her skal alt av hardware og firmware ligge
