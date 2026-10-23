@@ -63,6 +63,7 @@ function App() {
             scores={game.scores}
             onPlayAgain={game.playAgain}
             onMainMenu={game.resetGame}
+            onBackToLobby={game.backToLobby}
           />
         );
       case 'question-bank':

@@ -115,5 +115,6 @@ export function useGameEngine() {
     nextQuestion,
     resetGame,
     playAgain,
+    backToLobby: () => setScreen('lobby'),
   };
 }

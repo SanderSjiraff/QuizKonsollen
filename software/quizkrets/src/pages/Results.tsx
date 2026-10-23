@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Trophy, RotateCcw, Home, Crown, Medal, Award } from 'lucide-react';
+import { Trophy, RotateCcw, Home, Crown, Medal, Award, ArrowLeft } from 'lucide-react';
 import type { Player } from '../types';
 
 interface ResultsProps {
@@ -7,9 +7,10 @@ interface ResultsProps {
   scores: Record<number, number>;
   onPlayAgain: () => void;
   onMainMenu: () => void;
+  onBackToLobby?: () => void;
 }
 
-export default function Results({ players, scores, onPlayAgain, onMainMenu }: ResultsProps) {
+export default function Results({ players, scores, onPlayAgain, onMainMenu, onBackToLobby }: ResultsProps) {
   const sortedPlayers = [...players].sort((a, b) => {
     const scoreA = scores[a.id] || 0;
     const scoreB = scores[b.id] || 0;
@@ -122,6 +123,12 @@ export default function Results({ players, scores, onPlayAgain, onMainMenu }: Re
           <RotateCcw className="w-6 h-6" />
           Spill igjen
         </button>
+        {onBackToLobby && (
+          <button onClick={onBackToLobby} className="btn-secondary text-xl flex items-center gap-3">
+            <ArrowLeft className="w-6 h-6" />
+            Tilbake til lobby
+          </button>
+        )}
         <button onClick={onMainMenu} className="btn-secondary text-xl flex items-center gap-3">
           <Home className="w-6 h-6" />
           Hovedmeny

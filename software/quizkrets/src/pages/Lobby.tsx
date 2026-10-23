@@ -11,10 +11,12 @@ interface LobbyProps {
 }
 
 export default function Lobby({ players, updatePlayer, onStart, onBack }: LobbyProps) {
-  const allReady = players.every(p => p.isReady);
+  const allReady = players.length === 1 ? true : players.every(p => p.isReady);
 
   const toggleReady = (playerId: number) => {
     const player = players.find(p => p.id === playerId);
+    // Ikke tillat å un-ready spiller 1 hvis det bare er én spiller
+    if (players.length === 1 && player?.isReady) return;
     updatePlayer(playerId, { isReady: !player?.isReady });
   };
 

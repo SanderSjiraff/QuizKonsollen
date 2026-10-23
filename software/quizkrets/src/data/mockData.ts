@@ -189,10 +189,7 @@ export const PLAYER_COLORS = [
 ];
 
 export const DEFAULT_PLAYERS: Player[] = [
-  { id: 1, name: 'Spiller 1', color: PLAYER_COLORS[0], score: 0, isReady: false },
-  { id: 2, name: 'Spiller 2', color: PLAYER_COLORS[1], score: 0, isReady: false },
-  { id: 3, name: 'Spiller 3', color: PLAYER_COLORS[2], score: 0, isReady: false },
-  { id: 4, name: 'Spiller 4', color: PLAYER_COLORS[3], score: 0, isReady: false },
+  { id: 1, name: 'Spiller 1', color: PLAYER_COLORS[0], score: 0, isReady: true }, // Alltid minst 1 spiller, auto-klar
 ];
 
 export const SAMPLE_PRESETS: QuizPreset[] = [
