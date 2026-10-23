@@ -2,14 +2,29 @@ import { useGameEngine } from './hooks/useGameEngine';
 import Layout from './components/Layout';
 import MainMenu from './pages/MainMenu';
 import QuizBuilder from './pages/QuizBuilder';
+import SavedQuizzes from './pages/SavedQuizzes';
 import GameSetup from './pages/GameSetup';
 import Lobby from './pages/Lobby';
 import GamePlay from './pages/GamePlay';
 import Results from './pages/Results';
 import QuestionBank from './pages/QuestionBank';
+import { saveQuizPreset } from './data/savedQuizzes';
 
 function App() {
   const game = useGameEngine();
+
+  const handleLoadPreset = (preset: { id: string; name: string; categories: string[]; difficulties: string[]; questionCount: number; categoryWeights: Record<string, number>; rounds: { mode: string; questionCount: number; timeLimit: number; pointsPerCorrect: number; pointsPerWrong: number; bonusForSpeed?: boolean }[] }) => {
+    // Update config with preset values
+    game.updateConfig({
+      selectedCategories: preset.categories,
+      selectedDifficulties: preset.difficulties as ('lett' | 'middels' | 'vanskelig')[],
+      questionCount: preset.questionCount,
+      gameMode: preset.rounds[0].mode as ('classic' | 'buzzer' | 'team'),
+      timePerQuestion: preset.rounds[0].timeLimit,
+    });
+    // Navigate to lobby
+    game.startGame();
+  };
 
   const renderScreen = () => {
     switch (game.screen) {
@@ -22,6 +37,33 @@ function App() {
             updateConfig={game.updateConfig}
             onBack={() => game.navigateTo('main-menu')}
             onStart={() => game.startGame()}
+            onSaveQuiz={() => {
+              // Save current config as a preset
+              const preset: import('./types').QuizPreset = {
+                id: `custom-${Date.now()}`,
+                name: `Quiz ${new Date().toLocaleDateString('no-NO')}`,
+                categories: game.config.selectedCategories,
+                difficulties: game.config.selectedDifficulties as ('lett' | 'middels' | 'vanskelig')[],
+                questionCount: game.config.questionCount,
+                categoryWeights: {},
+                rounds: [{
+                  mode: game.config.gameMode,
+                  questionCount: game.config.questionCount,
+                  timeLimit: game.config.timePerQuestion,
+                  pointsPerCorrect: 100,
+                  pointsPerWrong: 0,
+                }],
+              };
+              saveQuizPreset(preset);
+            }}
+          />
+        );
+      case 'saved-quizzes':
+        return (
+          <SavedQuizzes
+            onBack={() => game.navigateTo('main-menu')}
+            onSelectQuiz={handleLoadPreset}
+            onCreateQuiz={() => game.navigateTo('quiz-builder')}
           />
         );
       case 'game-setup':

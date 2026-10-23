@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Plus, Minus, Shuffle, Check } from 'lucide-react';
+import { ArrowLeft, Plus, Minus, Shuffle, Check, Save } from 'lucide-react';
 import type { GameConfig } from '../hooks/useGameEngine';
-import { CATEGORIES, SAMPLE_PRESETS } from '../data/mockData';
+import { CATEGORIES, SAMPLE_PRESETS, PLAYER_COLORS } from '../data/mockData';
 
 interface QuizBuilderProps {
   config: GameConfig;
   updateConfig: (updates: Partial<GameConfig>) => void;
   onBack: () => void;
   onStart: () => void;
+  onSaveQuiz: () => void;
 }
 
-export default function QuizBuilder({ config, updateConfig, onBack, onStart }: QuizBuilderProps) {
+export default function QuizBuilder({ config, updateConfig, onBack, onStart, onSaveQuiz }: QuizBuilderProps) {
   const [usePreset, setUsePreset] = useState(false);
 
   const toggleCategory = (categoryId: string) => {
@@ -31,6 +32,29 @@ export default function QuizBuilder({ config, updateConfig, onBack, onStart }: Q
   const adjustQuestionCount = (delta: number) => {
     const newCount = Math.max(5, Math.min(50, config.questionCount + delta));
     updateConfig({ questionCount: newCount });
+  };
+
+  const adjustPlayerCount = (delta: number) => {
+    const currentCount = config.players.length;
+    const newCount = Math.max(1, Math.min(8, currentCount + delta));
+    
+    if (newCount > currentCount) {
+      // Legg til spillere
+      const newPlayers = [...config.players];
+      for (let i = currentCount; i < newCount; i++) {
+        newPlayers.push({
+          id: i + 1,
+          name: `Spiller ${i + 1}`,
+          color: PLAYER_COLORS[i % PLAYER_COLORS.length],
+          score: 0,
+          isReady: i === 0, // Spiller 1 er automatisk klar
+        });
+      }
+      updateConfig({ players: newPlayers });
+    } else if (newCount < currentCount) {
+      // Fjern spillere
+      updateConfig({ players: config.players.slice(0, newCount) });
+    }
   };
 
   const loadPreset = (presetId: string) => {
@@ -254,11 +278,72 @@ export default function QuizBuilder({ config, updateConfig, onBack, onStart }: Q
           </div>
         </motion.div>
 
-        {/* Start-knapp */}
+        {/* Antall spillere */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.55 }}
+          className="card"
+        >
+          <h2 className="font-display text-2xl text-text-primary mb-4">Antall spillere</h2>
+          <div className="flex items-center gap-6 justify-center">
+            <button
+              onClick={() => adjustPlayerCount(-1)}
+              disabled={config.players.length <= 1}
+              className="btn-secondary p-4 disabled:opacity-50"
+            >
+              <Minus className="w-6 h-6" />
+            </button>
+            <span className="font-display text-5xl text-primary min-w-[100px] text-center">
+              {config.players.length}
+            </span>
+            <button
+              onClick={() => adjustPlayerCount(1)}
+              disabled={config.players.length >= 8}
+              className="btn-secondary p-4 disabled:opacity-50"
+            >
+              <Plus className="w-6 h-6" />
+            </button>
+          </div>
+          <p className="text-text-secondary text-center mt-2">
+            {config.players.length === 1 ? "Enspiller: Spill alene og prøv å slå din egen rekord" : `Flerspiller: ${config.players.length} spillere`}
+          </p>
+          
+          {/* Spilleroversikt */}
+          <div className="flex justify-center gap-3 mt-4">
+            {config.players.map((p, i) => (
+              <div 
+                key={p.id} 
+                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                style={{ backgroundColor: PLAYER_COLORS[i % PLAYER_COLORS.length] }}
+              >
+                {p.id}
+              </div>
+            ))}
+          </div>
+        </motion.div>
+        {/* Lagre quiz */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ delay: 0.6 }}
+          className="flex justify-center pb-4"
+        >
+          <button
+            onClick={onSaveQuiz}
+            disabled={!canStart}
+            className="btn-secondary text-xl px-8 py-4 flex items-center gap-3"
+          >
+            <Save className="w-6 h-6" />
+            Lagre quiz
+          </button>
+        </motion.div>
+
+        {/* Start-knapp */}
+        <motion.div
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.65 }}
           className="flex justify-center pb-12"
         >
           <button

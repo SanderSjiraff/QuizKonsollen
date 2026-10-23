@@ -1,6 +1,7 @@
 export type Screen = 
   | 'main-menu'
   | 'quiz-builder'
+  | 'saved-quizzes'
   | 'game-setup'
   | 'lobby'
   | 'game-play'

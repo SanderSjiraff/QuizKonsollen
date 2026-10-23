@@ -10,7 +10,7 @@ const menuItems = [
   { id: 'game-setup' as Screen, label: 'Start spill', icon: Play, description: 'Begynn en ny quiz', color: 'bg-primary' },
   { id: 'quiz-builder' as Screen, label: 'Bygg quiz', icon: Wrench, description: 'Lag din egen quiz', color: 'bg-info' },
   { id: 'question-bank' as Screen, label: 'Spørsmålsbank', icon: BookOpen, description: 'Behandle spørsmål', color: 'bg-success' },
-  { id: 'main-menu' as Screen, label: 'Lagrede quizer', icon: Trophy, description: 'Dine lagrede quizer', color: 'bg-secondary' },
+  { id: 'saved-quizzes' as Screen, label: 'Lagrede quizer', icon: Trophy, description: 'Dine lagrede quizer', color: 'bg-secondary' },
   { id: 'main-menu' as Screen, label: 'Innstillinger', icon: Settings, description: 'Systeminnstillinger', color: 'bg-player-7' },
 ];
 
