@@ -1,6 +1,6 @@
-# ⚡ QuizKrets
+# ⚡ QuizKonsollen
 
-**QuizKrets** er et prosjekt som kombinerer en fleksibel digital quizplattform med et fysisk elektronisk spillsystem.
+**QuizKonsollen** er et prosjekt som kombinerer en fleksibel digital quizplattform med et fysisk elektronisk spillsystem.
 
 Målet er å utvikle et underholdende og sosialt quizspill som kan spilles med venner på en felles skjerm, uten behov for mobiltelefoner. Prosjektet kombinerer programmering, elektronikk og systemutvikling.
 
