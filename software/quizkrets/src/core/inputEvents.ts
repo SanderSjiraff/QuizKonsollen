@@ -10,7 +10,7 @@
 
 export type GameInputEvent =
   | { type: 'PLAYER_BUZZ'; playerId: number; timestamp: number }
-  | { type: 'PLAYER_ANSWER'; playerId: number; choiceId: string; timestamp: number }
+  | { type: 'PLAYER_ANSWER'; playerId: number; choiceIndex: number; timestamp: number }
   | { type: 'PLAYER_READY'; playerId: number; timestamp: number }
   | { type: 'NEXT_QUESTION'; timestamp: number }
   | { type: 'PAUSE_GAME'; timestamp: number };
@@ -71,7 +71,10 @@ const CHOICE_KEYS = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
 /**
  * Tastaturdriver: oversetter tastetrykk til GameInputEvent.
  *
- * Mapping:
+ * Mapping (position-basert, P0-fiks):
+ * - Svar sendes som synlig posisjon (choiceIndex), ikke choiceId.
+ *   GamePlay slår opp faktisk choiceId i gjeldende spørsmål – stokket
+ *   svarrekkefølge fra eksterne kilder påvirker dermed aldri valget.
  * - Buzz-modus: 1-8 buzzer fra spiller 1-8, A-D gir svar for aktiv spiller.
  * - Vanlig modus: 1-8 velger svaralternativ 1-8 for aktiv spiller.
  * - Mellomrom/Enter → neste spørsmål, P → pause, R → klar.
@@ -121,7 +124,7 @@ export class KeyboardDriver implements InputDriver {
           event = {
             type: 'PLAYER_ANSWER',
             playerId: ctx.activePlayerId,
-            choiceId: CHOICE_KEYS[n - 1],
+            choiceIndex: n - 1,
             timestamp: now,
           };
         }
@@ -131,7 +134,7 @@ export class KeyboardDriver implements InputDriver {
           event = {
             type: 'PLAYER_ANSWER',
             playerId: ctx.activePlayerId,
-            choiceId: CHOICE_KEYS[choiceIndex],
+            choiceIndex,
             timestamp: now,
           };
         }

@@ -177,6 +177,68 @@ test.describe('Tastaturnavigasjon under spill', () => {
 
     await expect(page.getByText(/vinner!/)).toBeVisible();
   });
+
+  test('tast 1 velger første synlige alternativ selv med stokket svarrekkefølge', async ({ page }) => {
+    // Regresjonstest (P0): Adaptere (OpenTDB) stokker svaralternativene, slik at
+    // choice-ID ikke følger visningsrekkefølge. Tast 1 må derfor velge første
+    // SYNGLIGE alternativ (choiceIndex 0), ikke choiceId 'a'.
+    //
+    // Seed banken med kun ett spørsmål der første synlige alternativ har id 'c'
+    // (feil) og fasiten 'a' ligger synlig sist. Med riktig position-mapping
+    // blir valg 1 registrert som feil (rød) og siste alternativ grønt.
+    const stokketSporsmal = {
+      id: 'e2e-stokket-1',
+      text: 'Regresjon: hvilket tall er fire?',
+      type: 'multiple_choice',
+      difficulty: 'lett',
+      categories: ['geografi'],
+      choices: [
+        { id: 'c', text: 'Feil – første synlige' },
+        { id: 'd', text: 'Feil – andre synlige' },
+        { id: 'b', text: 'Feil – tredje synlige' },
+        { id: 'a', text: 'Fire (riktig, synlig sist)' },
+      ],
+      correctChoiceIds: ['a'],
+      source: 'manual',
+      sourceRef: 'E2E-regresjonstest',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await page.addInitScript(q => {
+      localStorage.setItem('quizkrets_question_bank_v1', JSON.stringify([q]));
+      localStorage.setItem('quizkrets_question_bank_migrated_v1', 'done');
+    }, stokketSporsmal);
+
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+    await page.getByRole('button', { name: /Geografi/ }).first().click();
+    await page.getByRole('button', { name: /Start quiz/ }).click();
+
+    // Banken har bare 1 spørsmål – den strenge dialogen tilbyr reduksjon.
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: /Reduser antallet til 1 spørsmål/ }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    await expect(page.getByText('Regresjon: hvilket tall er fire?')).toBeVisible();
+    // Vent på at spørsmålets entré-animasjon er ferdig. Input-lytteren
+    // registreres i en effect rett etter commit, og uten dette vinduet kan
+    // tasteinndata gå tapt mellom render og lytterregistrering.
+    await page.waitForFunction(() => {
+      const h2s = Array.from(document.querySelectorAll('h2'));
+      const q = h2s.find(el => el.textContent?.includes('Regresjon'));
+      return !!q && getComputedStyle(q).opacity === '1';
+    });
+    await page.keyboard.press('1');
+    await page.waitForSelector('[data-testid="next-question"]', { state: 'visible' });
+
+    // Første synlige alternativ (id 'c') er valgt OG feil → rød ramme.
+    // Med gammel bug ville tast 1 registrert id 'a' (riktig) og første
+    // synlige alternativ ville vært umerket.
+    await expect(page.locator('[data-testid="choice-0"]')).toHaveClass(/border-error/);
+    // Fasiten (id 'a', synlig sist) vises grønn.
+    await expect(page.locator('[data-testid="choice-3"]')).toHaveClass(/border-success/);
+  });
 });
 
 test.describe('Buzzer-modus', () => {

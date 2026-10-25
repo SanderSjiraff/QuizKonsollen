@@ -200,7 +200,13 @@ export default function GamePlay({
     hub.start(event => {
       if (isPausedRef.current) return;
       if (event.type === 'PLAYER_ANSWER' && activePlayerIdRef.current !== null) {
-        submitAnswerRef.current(activePlayerIdRef.current, event.choiceId);
+        // Position-basert input: choiceIndex er synlig posisjon i gjeldende
+        // spørsmål. Faktisk choiceId slås opp her, så stokket svarrekkefølge
+        // (f.eks. fra OpenTDB) ikke påvirker valget.
+        const choice = questionRef.current?.choices[event.choiceIndex];
+        if (choice) {
+          submitAnswerRef.current(activePlayerIdRef.current, choice.id);
+        }
       } else if (event.type === 'PLAYER_BUZZ') {
         handleBuzzRef.current(event.playerId);
       } else if (event.type === 'NEXT_QUESTION') {
