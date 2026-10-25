@@ -76,6 +76,7 @@ export default function GamePlay({
   useEffect(() => {
     if (!question) return;
     questionStartRef.current = Date.now();
+    pausedAtRef.current = null;
     setLastFeedback(null);
     setIsPaused(false);
     if (isBuzzer) {
@@ -102,6 +103,9 @@ export default function GamePlay({
    * trenger å re-registreres når spørsmålet bytter). */
   const questionRef = useRef(question);
   useEffect(() => { questionRef.current = question; }, [question]);
+
+  /** P1 #10: tidspunktet eventuell pågående pause startet (null = ikke pauset). */
+  const pausedAtRef = useRef<number | null>(null);
 
   /** Fullfør spørsmålet og vis fasit. */
   const reveal = useCallback(() => {
@@ -150,6 +154,11 @@ export default function GamePlay({
       if (phaseRef.current !== 'buzzing' || isPausedRef.current) return;
       const player = players.find(p => p.id === playerId);
       if (!player) return;
+      // Synkron lås (P1 #10): første buzz vinner. Uten synkron ref-oppdatering
+      // kan to buzz-hendelser i samme hendelsesbølge (f.eks. to spillere som
+      // trykker samtidig på en flatsapp) begge passere vakten, og den siste
+      // stjeler turvennen fra den første.
+      phaseRef.current = 'answering';
       setPhase('answering');
       setActivePlayerId(playerId);
     },
@@ -161,9 +170,17 @@ export default function GamePlay({
     setIsPaused(prev => {
       const next = !prev;
       if (next) {
+        pausedAtRef.current = Date.now();
         timer.pause();
         onPause?.();
       } else {
+        // P1 #10: ekskluder pausetiden fra svartiden, slik at hastighets-
+        // bonusen ikke straffes for tiden spillet sto i pause (nedtellingen
+        // står også stille i pausen).
+        if (pausedAtRef.current !== null) {
+          questionStartRef.current += Date.now() - pausedAtRef.current;
+          pausedAtRef.current = null;
+        }
         timer.resume();
         onResume?.();
       }

@@ -450,6 +450,47 @@ test.describe('Filimport av spørsmål (P1 #9)', () => {
   });
 });
 
+test.describe('Pause ekskluderes fra svartid (P1 #10)', () => {
+  test('pausetid straffer ikke hastighetsbonusen', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    // Spørsmål 1: pause i 3 sekunder, fortsett og svar umiddelbart
+    await expect(page.getByText('Spørsmål 1 av 5')).toBeVisible();
+    await page.getByRole('button', { name: 'Pause' }).click();
+    await page.waitForTimeout(3000);
+    // Pause-overlay ligger øverst – bruk den knappen (topprad-knappen har
+    // samme navn via aria-label).
+    const overlay = page.locator('.fixed', { hasText: 'Spillet er stanset' });
+    await overlay.getByRole('button', { name: 'Fortsett' }).click();
+    await page.locator('[data-testid="choice-0"]').click();
+    await page.locator('[data-testid="next-question"]').click();
+
+    // Spill resten uten pause
+    for (let i = 1; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+
+    // Verifiser mot historikken: svartiden på spørsmål 1 må IKKE
+    // inneholde de ~3 sekundene spillet var pauset.
+    const firstAnswer = await page.evaluate(() => {
+      const raw = localStorage.getItem('quizkrets_history');
+      const history = JSON.parse(raw ?? '[]');
+      return history[0]?.answers?.find(
+        (a: { questionIndex: number }) => a.questionIndex === 0
+      );
+    });
+    expect(firstAnswer).toBeDefined();
+    expect(firstAnswer.timeTakenMs).toBeLessThan(2000);
+  });
+});
+
 test.describe('Buzzer-modus', () => {
   test('spiller buzzer med tast, svarer, og de andre får ubesvart', async ({ page }) => {
     await page.goto('/');
