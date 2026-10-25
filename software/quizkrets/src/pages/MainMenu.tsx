@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Play, Wrench, Settings, BookOpen, Trophy, Lightbulb } from 'lucide-react';
+import { Play, Wrench, BookOpen, Trophy, Lightbulb, Globe, BarChart3 } from 'lucide-react';
 import type { Screen } from '../types';
 
 interface MainMenuProps {
@@ -14,8 +14,9 @@ const menuItems = [
 
 const secondaryItems = [
   { id: 'saved-quizzes' as Screen, label: 'Lagrede quizer', icon: Trophy },
+  { id: 'scoreboard' as Screen, label: 'Poengtavle', icon: BarChart3 },
+  { id: 'fetch-from-api' as Screen, label: 'Hent fra nettet', icon: Globe },
   { id: 'question-sources' as Screen, label: 'Spørsmålsideer', icon: Lightbulb },
-  { id: 'main-menu' as Screen, label: 'Innstillinger', icon: Settings },
 ];
 
 export default function MainMenu({ onNavigate }: MainMenuProps) {

@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Clock, Trophy, ArrowRight, X } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { Clock, X, Pause, Play, Zap, CheckCircle2, XCircle, Eye } from 'lucide-react';
 import type { Question, Player } from '../types';
+import type { AnswerRecord } from '../core/scoring';
 import { useTimer } from '../hooks/useTimer';
+import { InputHub, KeyboardDriver } from '../core/inputEvents';
 
 interface GamePlayProps {
   question: Question | undefined;
@@ -11,10 +13,18 @@ interface GamePlayProps {
   players: Player[];
   scores: Record<number, number>;
   gameMode: string;
-  onAnswer: (playerId: number, choiceId: string, isCorrect: boolean) => void;
+  /** Sekunder per spørsmål fra quizkonfigurasjonen. */
+  timePerQuestion: number;
+  onAnswer: (playerId: number, choiceId: string, timeTakenMs: number) => boolean;
+  onTimeout: () => void;
   onNextQuestion: () => void;
   onQuit: () => void;
+  /** Svar registrert så langt for gjeldende spørsmål. */
+  questionAnswers: AnswerRecord[];
 }
+
+/** Fase i svarflyten for ett spørsmål. */
+type Phase = 'answering' | 'buzzing' | 'revealed';
 
 export default function GamePlay({
   question,
@@ -22,238 +32,394 @@ export default function GamePlay({
   totalQuestions,
   players,
   scores,
-  gameMode: _gameMode,
+  gameMode,
+  timePerQuestion,
   onAnswer,
+  onTimeout,
   onNextQuestion,
   onQuit,
+  questionAnswers,
 }: GamePlayProps) {
-  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  const [showResult, setShowResult] = useState(false);
-  const [isCorrect, setIsCorrect] = useState(false);
-  const [activePlayerId] = useState(1);
+  const reducedMotion = useReducedMotion();
+  const [phase, setPhase] = useState<Phase>('answering');
+  /** Spilleren som for øyeblikket skal svare (hot-seat/buzzer). */
+  const [activePlayerId, setActivePlayerId] = useState<number | null>(null);
+  /** Kort per-spiller-feedback i hot-seat ("Spiller 2: riktig!"). */
+  const [lastFeedback, setLastFeedback] = useState<{ playerId: number; correct: boolean } | null>(null);
+  const [isPaused, setIsPaused] = useState(false);
 
-  const { timeRemaining, start, reset } = useTimer(20, () => {
-    if (!showResult) {
-      handleTimeUp();
+  const questionStartRef = useRef<number>(Date.now());
+  const phaseRef = useRef<Phase>('answering');
+  phaseRef.current = phase;
+
+  const isBuzzer = gameMode === 'buzzer' && players.length > 1;
+
+  const timer = useTimer(() => {
+    // Enkel timeout per spørsmål: alt som ikke er besvart registreres som ubesvart.
+    if (phaseRef.current !== 'revealed') {
+      setPhase('revealed');
+      onTimeout();
     }
   });
 
+  // Når et nytt spørsmål vises: nullstill fase og start tidturen fra konfigurasjonen.
   useEffect(() => {
-    if (question) {
-      setSelectedAnswer(null);
-      setShowResult(false);
-      setIsCorrect(false);
-      reset(20);
-      setTimeout(() => start(), 500);
+    if (!question) return;
+    questionStartRef.current = Date.now();
+    setLastFeedback(null);
+    setIsPaused(false);
+    if (isBuzzer) {
+      setPhase('buzzing');
+      setActivePlayerId(null);
+    } else {
+      setPhase('answering');
+      const first = players[0];
+      setActivePlayerId(first ? first.id : null);
     }
-  }, [question, reset, start]);
+    timer.start(timePerQuestion);
+    return () => timer.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question?.id, timePerQuestion]);
 
-  const handleTimeUp = useCallback(() => {
-    setShowResult(true);
-    setIsCorrect(false);
-    onAnswer(activePlayerId, '', false);
-  }, [activePlayerId, onAnswer]);
+  const answeredIds = useMemo(
+    () => new Set(questionAnswers.map(a => a.playerId)),
+    [questionAnswers]
+  );
 
-  const handleAnswer = (choiceId: string) => {
-    if (showResult) return;
+  /** Fullfør spørsmålet og vis fasit. */
+  const reveal = useCallback(() => {
+    timer.stop();
+    setPhase('revealed');
+  }, [timer]);
 
-    const correct = question?.correctChoiceIds.includes(choiceId) || false;
-    setSelectedAnswer(choiceId);
-    setIsCorrect(correct);
-    setShowResult(true);
-    onAnswer(activePlayerId, choiceId, correct);
-  };
+  /** Håndter at den aktive spilleren velger et svar. */
+  const submitAnswer = useCallback(
+    (playerId: number, choiceId: string) => {
+      if (phase === 'revealed' || isPaused) return;
+      if (answeredIds.has(playerId)) return; // duplikatbeskyttelse
 
-  const handleNext = () => {
-    onNextQuestion();
-  };
+      const timeTaken = Date.now() - questionStartRef.current;
+      const ok = onAnswer(playerId, choiceId, timeTaken);
+      if (!ok) return;
 
-  const progress = ((currentQuestionIndex + 1) / totalQuestions) * 100;
+      const correct = question?.correctChoiceIds.includes(choiceId) ?? false;
+      setLastFeedback({ playerId, correct });
+
+      if (isBuzzer) {
+        // Buzzer: bare én spiller svarer – avslør umiddelbart.
+        reveal();
+      } else {
+        // Hot-seat: neste spiller som ikke har svart, ellers avslør.
+        const next = players.find(p => !answeredIds.has(p.id) && p.id !== playerId);
+        if (next) {
+          setActivePlayerId(next.id);
+        } else {
+          reveal();
+        }
+      }
+    },
+    [phase, isPaused, answeredIds, question, onAnswer, players, isBuzzer, reveal]
+  );
+
+  /** Håndter buzz fra en spiller (buzzer-modus). */
+  const handleBuzz = useCallback(
+    (playerId: number) => {
+      if (phase !== 'buzzing' || isPaused) return;
+      const player = players.find(p => p.id === playerId);
+      if (!player) return;
+      setPhase('answering');
+      setActivePlayerId(playerId);
+    },
+    [phase, isPaused, players]
+  );
+
+  // Generisk input: tastatur → GameInputEvent.
+  useEffect(() => {
+    const hub = new InputHub();
+    const driver = new KeyboardDriver(() => ({
+      activePlayerId: activePlayerId ?? 1,
+      buzzMode: phase === 'buzzing',
+      choiceCount: question?.choices.length ?? 0,
+      playerCount: players.length,
+    }));
+    hub.register(driver);
+    hub.start(event => {
+      if (isPaused) return;
+      if (event.type === 'PLAYER_ANSWER' && activePlayerId !== null) {
+        submitAnswer(activePlayerId, event.choiceId);
+      } else if (event.type === 'PLAYER_BUZZ') {
+        handleBuzz(event.playerId);
+      } else if (event.type === 'NEXT_QUESTION' && phase === 'revealed') {
+        onNextQuestion();
+      } else if (event.type === 'PAUSE_GAME') {
+        togglePause();
+      }
+    });
+    return () => hub.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePlayerId, phase, isPaused, question?.id, submitAnswer, handleBuzz, onNextQuestion]);
+
+  const togglePause = useCallback(() => {
+    if (phase === 'revealed') return;
+    setIsPaused(prev => {
+      const next = !prev;
+      if (next) timer.pause();
+      else timer.resume();
+      return next;
+    });
+  }, [phase, timer]);
 
   if (!question) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-2xl text-text-secondary">Ingen spørsmål tilgjengelig</p>
+        <p className="text-text-secondary text-xl">Ingen spørsmål å vise.</p>
       </div>
     );
   }
 
-  const getTimerColor = () => {
-    if (timeRemaining > 10) return 'text-success';
-    if (timeRemaining > 5) return 'text-warning';
-    return 'text-error';
+  const activePlayer = players.find(p => p.id === activePlayerId);
+  const timeRatio = timePerQuestion > 0 ? timer.secondsRemaining / timePerQuestion : 1;
+  const timeCritical = timer.secondsRemaining <= 5 && timer.isRunning;
+
+  const choiceState = (choiceId: string) => {
+    if (phase !== 'revealed') return 'idle' as const;
+    const isCorrect = question.correctChoiceIds.includes(choiceId);
+    return isCorrect ? ('correct' as const) : ('wrong' as const);
   };
 
   return (
-    <div className="min-h-screen flex flex-col p-6 md:p-12">
-      {/* Top-bar: Progresjon og poeng */}
-      <div className="flex items-center justify-between mb-8">
-        <button onClick={onQuit} className="btn-secondary p-3">
-          <X className="w-6 h-6" />
-        </button>
-
-        {/* Progresjonsbar */}
-        <div className="flex-1 mx-8">
-          <div className="flex justify-between text-text-secondary mb-2">
-            <span>Spørsmål {currentQuestionIndex + 1} / {totalQuestions}</span>
-            <span>{Math.round(progress)}%</span>
-          </div>
-          <div className="h-3 bg-bg-elevated rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-primary rounded-full"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.5 }}
-            />
+    <div className="min-h-screen p-4 md:p-8 flex flex-col">
+      {/* Topprad: fremdrift, spillere, tid, pause */}
+      <div className="flex items-center justify-between gap-4 flex-wrap mb-6">
+        <div className="flex items-center gap-3">
+          <button onClick={onQuit} className="btn-secondary p-2.5" aria-label="Avslutt spillet">
+            <X className="w-6 h-6" />
+          </button>
+          <div>
+            <p className="text-text-secondary text-sm">
+              Spørsmål {currentQuestionIndex + 1} av {totalQuestions}
+            </p>
+            <p className="text-text-muted text-xs capitalize">
+              {question.difficulty}
+              {question.categories[0] ? ` • ${question.categories[0]}` : ''}
+            </p>
           </div>
         </div>
 
-        {/* Poengoversikt */}
-        <div className="flex gap-4">
-          {players.slice(0, 4).map(player => (
-            <div key={player.id} className="text-center">
+        {/* Poengtavle med spillerstatus */}
+        <div className="flex items-center gap-2 flex-wrap justify-center">
+          {players.map(player => {
+            const answered = answeredIds.has(player.id);
+            const record = questionAnswers.find(a => a.playerId === player.id);
+            const isActive = player.id === activePlayerId && phase !== 'revealed';
+            return (
               <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold mb-1"
-                style={{ backgroundColor: player.color }}
+                key={player.id}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 transition-all ${
+                  isActive
+                    ? 'border-primary bg-primary/15 scale-105'
+                    : answered
+                      ? 'border-border/50 bg-bg-elevated opacity-80'
+                      : 'border-border/50 bg-bg-elevated'
+                }`}
+                style={isActive ? { borderColor: player.color } : undefined}
               >
-                {player.id}
+                <span className="w-3 h-3 rounded-full" style={{ backgroundColor: player.color }} />
+                <span className="font-semibold text-text-primary">{player.name}</span>
+                <span className="text-primary font-display">{scores[player.id] ?? 0}</span>
+                {phase === 'revealed' && record && (
+                  record.choiceId === null ? (
+                    <Eye className="w-4 h-4 text-text-muted" aria-label="Ubesvart" />
+                  ) : record.isCorrect ? (
+                    <CheckCircle2 className="w-4 h-4 text-success" aria-label="Riktig" />
+                  ) : (
+                    <XCircle className="w-4 h-4 text-error" aria-label="Feil" />
+                  )
+                )}
               </div>
-              <span className="text-lg font-display text-primary">
-                {scores[player.id] || 0}
-              </span>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button onClick={togglePause} className="btn-secondary p-2.5" aria-label={isPaused ? 'Fortsett' : 'Pause'}>
+            {isPaused ? <Play className="w-6 h-6" /> : <Pause className="w-6 h-6" />}
+          </button>
+          <div
+            className={`flex items-center gap-2 font-display text-4xl tabular-nums ${
+              timeCritical ? 'text-error' : 'text-primary'
+            }`}
+            aria-live="polite"
+            aria-label={`Tid igjen: ${timer.secondsRemaining} sekunder`}
+          >
+            <Clock className={`w-8 h-8 ${timeCritical ? 'animate-pulse' : ''}`} />
+            {timer.secondsRemaining}s
+          </div>
         </div>
       </div>
 
-      {/* Hovedinnhold */}
-      <div className="flex-1 flex flex-col items-center justify-center max-w-5xl mx-auto w-full">
-        {/* Timer */}
-        <AnimatePresence>
-          {!showResult && (
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0 }}
-              className="mb-8"
-            >
-              <div className={`relative w-24 h-24 rounded-full border-4 border-bg-elevated flex items-center justify-center ${getTimerColor()}`}>
-                <Clock className="w-8 h-8 absolute -top-2 -right-2 bg-bg-primary rounded-full p-1" />
-                <span className="font-display text-4xl">{timeRemaining}</span>
-              </div>
-            </motion.div>
-          )}
+      {/* Tidslinje */}
+      <div className="h-2 bg-bg-elevated rounded-full overflow-hidden mb-8" role="progressbar" aria-valuenow={timer.secondsRemaining} aria-valuemin={0} aria-valuemax={timePerQuestion}>
+        <div
+          className={`h-full rounded-full transition-all duration-100 ${
+            timeCritical ? 'bg-error' : 'bg-primary'
+          }`}
+          style={{ width: `${Math.max(0, timeRatio * 100)}%` }}
+        />
+      </div>
+
+      {/* Aktiv spiller-banner */}
+      <AnimatePresence mode="wait">
+        {(phase === 'buzzing' || (phase === 'answering' && activePlayer)) && (
+          <motion.div
+            key={phase === 'buzzing' ? 'buzz' : `active-${activePlayer?.id}`}
+            initial={reducedMotion ? false : { y: -10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="self-center mb-4 px-6 py-3 rounded-2xl border-2 flex items-center gap-3"
+            style={{
+              borderColor: phase === 'buzzing' ? 'var(--color-primary)' : activePlayer?.color,
+              backgroundColor: 'rgba(15, 23, 42, 0.8)',
+            }}
+          >
+            <Zap className="w-6 h-6 text-primary" />
+            {phase === 'buzzing' ? (
+              <span className="font-display text-2xl text-text-primary">
+                Buzz når du kan! Trykk spillernummeret ditt (1–{players.length})
+              </span>
+            ) : (
+              <span className="font-display text-2xl text-text-primary">
+                {activePlayer?.name} svarer
+                <span className="text-text-secondary text-lg ml-2">
+                  (tast 1–{question.choices.length})
+                </span>
+              </span>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Spørsmål */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-8 max-w-5xl mx-auto w-full">
+        <AnimatePresence mode="wait">
+          <motion.h2
+            key={question.id}
+            initial={reducedMotion ? false : { opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={reducedMotion ? undefined : { opacity: 0, y: -20 }}
+            className="tv-heading text-center text-text-primary leading-tight"
+          >
+            {question.text}
+          </motion.h2>
         </AnimatePresence>
 
-        {/* Spørsmål */}
-        <motion.div
-          key={question.id}
-          initial={{ y: 50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="text-center mb-12"
-        >
-          <div className="inline-block px-4 py-1 rounded-full bg-bg-elevated text-text-secondary text-sm mb-4">
-            {question.categories.join(' • ')} • {question.difficulty}
-          </div>
-          <h2 className="font-display text-4xl md:text-5xl lg:text-6xl text-text-primary leading-tight">
-            {question.text}
-          </h2>
-        </motion.div>
-
-        {/* Svaralternativer */}
+        {/* Svaralternativer – store, TV-vennlige */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
           {question.choices.map((choice, index) => {
-            const isSelected = selectedAnswer === choice.id;
-            const isCorrectAnswer = question.correctChoiceIds.includes(choice.id);
-            const showCorrect = showResult && isCorrectAnswer;
-            const showWrong = showResult && isSelected && !isCorrectAnswer;
-
+            const state = choiceState(choice.id);
+            const isSelectedByActive =
+              phase === 'revealed' &&
+              questionAnswers.some(a => a.choiceId === choice.id);
             return (
               <motion.button
                 key={choice.id}
-                initial={{ y: 30, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: index * 0.1 }}
-                onClick={() => handleAnswer(choice.id)}
-                disabled={showResult}
-                className={`p-6 md:p-8 rounded-2xl border-4 text-left transition-all duration-300 ${
-                  showCorrect
-                    ? 'border-success bg-success/20 shadow-[0_0_30px_rgba(34,197,94,0.3)]'
-                    : showWrong
-                    ? 'border-error bg-error/20 shadow-[0_0_30px_rgba(220,38,38,0.3)]'
-                    : isSelected
-                    ? 'border-primary bg-primary/10'
-                    : 'border-border bg-bg-secondary hover:border-primary/50 hover:bg-bg-elevated'
-                }`}
+                data-testid={`choice-${index}`}
+                initial={reducedMotion ? false : { opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: reducedMotion ? 0 : index * 0.05 }}
+                onClick={() => {
+                  if (phase === 'buzzing') return;
+                  if (phase === 'answering' && activePlayerId !== null) {
+                    submitAnswer(activePlayerId, choice.id);
+                  }
+                }}
+                disabled={phase === 'revealed' || isPaused || phase === 'buzzing'}
+                className={`
+                  relative p-6 rounded-2xl border-2 text-left font-semibold text-xl
+                  transition-all min-h-[88px] flex items-center gap-4
+                  ${state === 'correct'
+                    ? 'border-success bg-success/15 text-success'
+                    : state === 'wrong' && isSelectedByActive
+                      ? 'border-error bg-error/15 text-error'
+                      : state === 'wrong'
+                        ? 'border-border/30 bg-bg-elevated/50 text-text-muted'
+                        : 'border-border bg-bg-elevated text-text-primary hover:border-primary hover:bg-primary/10 hover:-translate-y-0.5'
+                  }
+                  disabled:cursor-default disabled:hover:translate-y-0
+                `}
               >
-                <div className="flex items-center gap-4">
-                  <span className={`w-12 h-12 rounded-xl flex items-center justify-center text-xl font-display ${
-                    showCorrect
-                      ? 'bg-success text-bg-primary'
-                      : showWrong
-                      ? 'bg-error text-bg-primary'
-                      : 'bg-bg-elevated text-text-secondary'
-                  }`}>
-                    {String.fromCharCode(65 + index)}
-                  </span>
-                  <span className={`text-xl md:text-2xl font-semibold ${
-                    showCorrect
-                      ? 'text-success'
-                      : showWrong
-                      ? 'text-error'
-                      : 'text-text-primary'
-                  }`}>
-                    {choice.text}
-                  </span>
-                </div>
+                <span className="flex-shrink-0 w-10 h-10 rounded-xl bg-bg-card flex items-center justify-center font-display text-primary text-lg border border-border">
+                  {index + 1}
+                </span>
+                <span className="flex-1">{choice.text}</span>
+                {state === 'correct' && <CheckCircle2 className="w-8 h-8 text-success flex-shrink-0" />}
               </motion.button>
             );
           })}
         </div>
 
-        {/* Resultat-feedback */}
+        {/* Per-spiller feedback i hot-seat */}
         <AnimatePresence>
-          {showResult && (
+          {lastFeedback && phase !== 'revealed' && (
             <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
+              initial={reducedMotion ? false : { scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className={`mt-8 p-6 rounded-2xl text-center ${
-                isCorrect ? 'bg-success/20 border-2 border-success' : 'bg-error/20 border-2 border-error'
+              exit={{ opacity: 0 }}
+              className={`px-5 py-2.5 rounded-xl font-semibold text-lg ${
+                lastFeedback.correct
+                  ? 'bg-success/15 text-success border border-success/50'
+                  : 'bg-error/15 text-error border border-error/50'
               }`}
+              role="status"
             >
-              <h3 className={`text-3xl font-display mb-2 ${isCorrect ? 'text-success' : 'text-error'}`}>
-                {isCorrect ? 'Riktig!' : 'Feil!'}
-              </h3>
-              {question.explanation && (
-                <p className="text-text-secondary text-lg">{question.explanation}</p>
-              )}
+              {players.find(p => p.id === lastFeedback.playerId)?.name}:{' '}
+              {lastFeedback.correct ? 'riktig! ✔' : 'feil ✘'}
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Neste-knapp */}
-        <AnimatePresence>
-          {showResult && (
-            <motion.button
-              initial={{ y: 20, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              transition={{ delay: 0.5 }}
-              onClick={handleNext}
-              className="btn-primary text-xl px-12 py-4 mt-8 flex items-center gap-3"
-            >
-              {currentQuestionIndex < totalQuestions - 1 ? (
-                <>
-                  Neste spørsmål <ArrowRight className="w-6 h-6" />
-                </>
-              ) : (
-                <>
-                  Se resultater <Trophy className="w-6 h-6" />
-                </>
-              )}
-            </motion.button>
-          )}
-        </AnimatePresence>
       </div>
+
+      {/* Fasit og forklaring */}
+      <AnimatePresence>
+        {phase === 'revealed' && (
+          <motion.div
+            initial={reducedMotion ? false : { y: 30, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="mt-6 mb-2 max-w-5xl mx-auto w-full"
+          >
+            {question.explanation && (
+              <p className="text-text-secondary text-center mb-4 text-lg">{question.explanation}</p>
+            )}
+            <button
+              onClick={onNextQuestion}
+              data-testid="next-question"
+              className="btn-primary w-full py-4 text-xl font-display flex items-center justify-center gap-2"
+            >
+              {currentQuestionIndex < totalQuestions - 1 ? 'Neste spørsmål' : 'Se resultater'}
+              <span className="text-sm font-normal text-primary/80">(mellomrom)</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Pause-overlay */}
+      <AnimatePresence>
+        {isPaused && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-bg/90 flex flex-col items-center justify-center gap-6 z-50"
+          >
+            <h3 className="font-display text-5xl text-primary">Pause</h3>
+            <p className="text-text-secondary text-xl">Spillet er stanset. Tidturen står stille.</p>
+            <button onClick={togglePause} className="btn-primary text-xl py-4 px-10 flex items-center gap-3">
+              <Play className="w-6 h-6" />
+              Fortsett
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

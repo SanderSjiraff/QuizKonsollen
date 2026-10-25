@@ -1,242 +1,427 @@
 import { useState, useRef } from 'react';
-import { motion } from 'framer-motion';
-import { ArrowLeft, Upload, FileJson, Check, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ArrowLeft, Upload, FileJson, FileText, CheckCircle2, AlertCircle,
+  Download, Trash2,
+} from 'lucide-react';
 import type { Question } from '../types';
+import { addQuestions } from '../data/questionStore';
+import { validateQuestionDraft, type ValidationIssue } from '../core/questionValidation';
+import { normalizeText } from '../data/questionStore';
 
 interface ImportQuestionsProps {
   onBack: () => void;
-  onImportComplete: (questions: Question[]) => void;
+  onImportComplete: () => void;
+}
+
+interface ParsedQuestion {
+  raw: unknown;
+  preview: Question;
+  issues: ValidationIssue[];
+}
+
+const TEMPLATE_JSON = `[
+  {
+    "text": "Hva er hovedstaden i Norge?",
+    "type": "multiple_choice",
+    "difficulty": "lett",
+    "categories": ["geografi", "norge"],
+    "choices": [
+      { "id": "a", "text": "Oslo" },
+      { "id": "b", "text": "Bergen" },
+      { "id": "c", "text": "Trondheim" },
+      { "id": "d", "text": "Stavanger" }
+    ],
+    "correctChoiceIds": ["a"],
+    "explanation": "Oslo har vært hovedstad siden 1814."
+  }
+]`;
+
+const TEMPLATE_CSV = `text;type;difficulty;categories;correct;choice_a;choice_b;choice_c;choice_d;explanation
+Hva er hovedstaden i Norge?;multiple_choice;lett;geografi|norge;a;Oslo;Bergen;Trondheim;Stavanger;Oslo har vært hovedstad siden 1814.
+Norge er en monarki;true_false;lett;samfunn-og-kultur|politikk;a;Sant;Usant;;;`;
+
+/** Enkel CSV-parser som håndterer anførselstegn og semikolon. */
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let current: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === ';') {
+      current.push(field);
+      field = '';
+    } else if (char === '\n') {
+      current.push(field);
+      field = '';
+      if (current.some(c => c.trim() !== '')) rows.push(current);
+      current = [];
+    } else if (char !== '\r') {
+      field += char;
+    }
+  }
+  current.push(field);
+  if (current.some(c => c.trim() !== '')) rows.push(current);
+  return rows;
+}
+
+/** Konverter CSV-rader (med overskrift) til spørsmålskladder. */
+function csvToDrafts(rows: string[][]): unknown[] {
+  if (rows.length < 2) return [];
+  const header = rows[0].map(h => h.trim().toLowerCase());
+  const idx = (name: string) => header.indexOf(name);
+  const drafts: unknown[] = [];
+
+  for (const row of rows.slice(1)) {
+    const get = (name: string) => {
+      const i = idx(name);
+      return i >= 0 ? (row[i] ?? '').trim() : '';
+    };
+    const choicesRaw = ['choice_a', 'choice_b', 'choice_c', 'choice_d', 'choice_e', 'choice_f']
+      .map(get)
+      .filter(t => t !== '');
+    if (choicesRaw.length === 0 && !get('text')) continue;
+
+    const letters = ['a', 'b', 'c', 'd', 'e', 'f'];
+    const correctLetter = get('correct').toLowerCase();
+    const choices = choicesRaw.map((text, i) => ({ id: letters[i], text }));
+    const correctId = letters[choicesRaw.indexOf(correctLetter)] ?? letters[0];
+
+    drafts.push({
+      text: get('text'),
+      type: get('type') || (choices.length === 2 ? 'true_false' : 'multiple_choice'),
+      difficulty: get('difficulty') || 'lett',
+      categories: get('categories') ? get('categories').split('|').map(c => c.trim()).filter(Boolean) : [],
+      choices,
+      correctChoiceIds: [correctId],
+      explanation: get('explanation') || undefined,
+    });
+  }
+  return drafts;
+}
+
+/** Legg til ID og normaliser vanskelighet/type fra friere JSON-format. */
+function normalizeDraft(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const o = raw as Record<string, unknown>;
+  return {
+    ...o,
+    difficulty: mapDifficulty(o.difficulty),
+    type: mapType(o.type),
+    categories: Array.isArray(o.categories) ? o.categories : [o.category].filter(Boolean),
+    choices: Array.isArray(o.choices)
+      ? o.choices
+      : Array.isArray(o.answers)
+        ? o.answers
+        : o.choices,
+  };
+}
+
+function mapDifficulty(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const v = value.trim().toLowerCase();
+  if (v === 'easy' || v === 'lett') return 'lett';
+  if (v === 'medium' || v === 'middels' || v === 'moderat') return 'middels';
+  if (v === 'hard' || v === 'vanskelig') return 'vanskelig';
+  return value;
+}
+
+function mapType(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const v = value.trim().toLowerCase();
+  if (v === 'multiple' || v === 'mc' || v === 'multiple_choice') return 'multiple_choice';
+  if (v === 'boolean' || v === 'tf' || v === 'true_false') return 'true_false';
+  return value;
 }
 
 export default function ImportQuestions({ onBack, onImportComplete }: ImportQuestionsProps) {
   const [dragOver, setDragOver] = useState(false);
-  const [importedQuestions, setImportedQuestions] = useState<Question[]>([]);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [valid, setValid] = useState<ParsedQuestion[]>([]);
+  const [invalid, setInvalid] = useState<{ preview: string; issues: string[] }[]>([]);
+  const [duplicates, setDuplicates] = useState<string[]>([]);
+  const [imported, setImported] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const validateQuestion = (q: any): q is Question => {
-    return (
-      typeof q.id === 'string' &&
-      typeof q.text === 'string' &&
-      typeof q.type === 'string' &&
-      ['multiple_choice', 'buzzer', 'true_false'].includes(q.type) &&
-      typeof q.difficulty === 'string' &&
-      ['lett', 'middels', 'vanskelig'].includes(q.difficulty) &&
-      Array.isArray(q.categories) &&
-      Array.isArray(q.choices) &&
-      Array.isArray(q.correctChoiceIds)
-    );
-  };
-
-  const parseFile = async (file: File) => {
+  const handleFiles = async (files: FileList | null) => {
     setError(null);
-    setSuccess(false);
+    setImported(null);
+    setValid([]);
+    setInvalid([]);
+    setDuplicates([]);
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    setFileName(file.name);
 
     try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      
-      const questions: Question[] = Array.isArray(data) ? data : data.questions || [];
-      const validQuestions = questions.filter(validateQuestion);
+      const content = await file.text();
+      let rawQuestions: unknown[] = [];
 
-      if (validQuestions.length === 0) {
-        setError('Ingen gyldige spørsmål funnet i filen');
+      if (file.name.toLowerCase().endsWith('.csv')) {
+        rawQuestions = csvToDrafts(parseCsv(content));
+      } else {
+        const parsed = JSON.parse(content);
+        if (Array.isArray(parsed)) {
+          rawQuestions = parsed;
+        } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { questions?: unknown[] }).questions)) {
+          rawQuestions = (parsed as { questions: unknown[] }).questions;
+        } else {
+          setError('JSON-filen må inneholde en array med spørsmål (eller et objekt med "questions"-array).');
+          return;
+        }
+      }
+
+      if (rawQuestions.length === 0) {
+        setError('Ingen spørsmål funnet i filen.');
         return;
       }
 
-      setImportedQuestions(validQuestions);
-      setSuccess(true);
+      // Valider hvert spørsmål og skill gyldige/ugyldige/duplikater
+      const newValid: ParsedQuestion[] = [];
+      const newInvalid: { preview: string; issues: string[] }[] = [];
+      const newDuplicates: string[] = [];
+      const seenTexts = new Set<string>();
+
+      rawQuestions.forEach((raw, i) => {
+        const normalized = normalizeDraft(raw);
+        const validation = validateQuestionDraft(normalized);
+        const previewText =
+          typeof (normalized as { text?: unknown }).text === 'string'
+            ? (normalized as { text: string }).text
+            : `Spørsmål ${i + 1}`;
+
+        if (!validation.valid) {
+          newInvalid.push({
+            preview: previewText,
+            issues: [...new Set(validation.errors.map(e => e.message))],
+          });
+          return;
+        }
+
+        const q = normalized as unknown as Question;
+        const textKey = normalizeText(q.text);
+        if (seenTexts.has(textKey)) {
+          newDuplicates.push(q.text);
+          return;
+        }
+        seenTexts.add(textKey);
+        newValid.push({ raw: normalized, preview: q, issues: [] });
+      });
+
+      setValid(newValid);
+      setInvalid(newInvalid);
+      setDuplicates(newDuplicates);
     } catch (err) {
-      setError('Kunne ikke parse filen. Sjekk at den er gyldig JSON.');
+      setError(
+        err instanceof Error
+          ? `Kunne ikke lese filen: ${err.message}`
+          : 'Ukjent feil ved lesing av filen.'
+      );
     }
   };
 
-  const handleFileDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/json') {
-      parseFile(file);
-    } else {
-      setError('Kun JSON-filer støttes');
-    }
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      parseFile(file);
-    }
-  };
-
-  const handleSaveToGame = () => {
-    if (importedQuestions.length > 0) {
-      // Lagre i localStorage for senere bruk
-      const existing = JSON.parse(localStorage.getItem('quizkrets_imported_questions') || '[]');
-      localStorage.setItem('quizkrets_imported_questions', JSON.stringify([...existing, ...importedQuestions]));
-      
-      onImportComplete(importedQuestions);
-    }
-  };
-
-  const handleDownloadTemplate = () => {
-    const template = [
-      {
-        id: "example-1",
-        text: "Hva er hovedstaden i Norge?",
-        type: "multiple_choice",
-        difficulty: "lett",
-        categories: ["geografi"],
-        choices: [
-          { id: "a", text: "Oslo" },
-          { id: "b", text: "Bergen" },
-          { id: "c", text: "Trondheim" },
-          { id: "d", text: "Stavanger" }
-        ],
-        correctChoiceIds: ["a"]
-      }
-    ];
-    
-    const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
+  const downloadTemplate = (format: 'json' | 'csv') => {
+    const blob = new Blob([format === 'json' ? TEMPLATE_JSON : TEMPLATE_CSV], {
+      type: format === 'json' ? 'application/json' : 'text/csv',
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'quizkrets-mal.json';
-    document.body.appendChild(a);
+    a.download = `quizkrets-mal.${format}`;
     a.click();
-    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
 
+  const handleImport = () => {
+    if (valid.length === 0) return;
+    // Duplikater mot eksisterende bank avvises av addQuestions
+    const result = addQuestions(
+      valid.map(v => v.preview),
+      'import',
+      fileName ?? 'Filimport'
+    );
+    setImported(result.added);
+    setValid([]);
+    setInvalid([]);
+    setDuplicates([]);
+    if (result.duplicates > 0) {
+      setDuplicates(
+        result.rejectedQuestions.map(q => q.text)
+      );
+    }
+    onImportComplete();
+  };
+
   return (
-    <div className="min-h-screen p-6 md:p-12">
+    <div className="min-h-screen p-6 md:p-10">
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
-        <button onClick={onBack} className="btn-secondary p-3">
+        <button onClick={onBack} className="btn-secondary p-3" aria-label="Tilbake">
           <ArrowLeft className="w-6 h-6" />
         </button>
-        <h1 className="tv-heading text-primary">Importer spørsmål</h1>
+        <div>
+          <h1 className="tv-heading text-primary">Importer spørsmål</h1>
+          <p className="text-text-secondary">Last inn spørsmål fra JSON- eller CSV-fil</p>
+        </div>
       </div>
 
-      <div className="max-w-3xl mx-auto space-y-6">
-        {/* Drop zone */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      <div className="max-w-4xl mx-auto space-y-6">
+        {/* Maler */}
+        <div className="card p-5">
+          <h2 className="font-semibold text-text-primary mb-3">Last ned mal</h2>
+          <div className="flex gap-3">
+            <button onClick={() => downloadTemplate('json')} className="btn-secondary flex items-center gap-2">
+              <FileJson className="w-5 h-5" />
+              JSON-mal
+            </button>
+            <button onClick={() => downloadTemplate('csv')} className="btn-secondary flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              CSV-mal
+            </button>
+          </div>
+          <p className="text-text-muted text-sm mt-3">
+            CSV bruker semikolon som skilletegn. Kategorier skilles med |. Feltene
+            «text;type;difficulty;categories;correct;choice_a;choice_b;choice_c;choice_d;explanation» støttes.
+          </p>
+        </div>
+
+        {/* Sone for dra og slipp */}
+        <div
+          onDragOver={e => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={handleFileDrop}
+          onDrop={e => {
+            e.preventDefault();
+            setDragOver(false);
+            handleFiles(e.dataTransfer.files);
+          }}
           onClick={() => fileInputRef.current?.click()}
-          className={`card min-h-[200px] flex flex-col items-center justify-center cursor-pointer transition-all ${
-            dragOver ? 'border-primary bg-primary/10 scale-[1.02]' : 'border-dashed border-2 border-border'
+          className={`card cursor-pointer transition-all p-10 text-center border-2 border-dashed ${
+            dragOver ? 'border-primary bg-primary/10' : 'border-border'
           }`}
+          role="button"
+          aria-label="Last opp fil med spørsmål"
         >
+          <Upload className="w-12 h-12 mx-auto text-primary mb-4" />
+          <p className="text-text-primary text-xl font-semibold">
+            Dra filen hit, eller klikk for å velge
+          </p>
+          <p className="text-text-muted mt-2">Støtter .json og .csv</p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".json,application/json"
-            onChange={handleFileSelect}
+            accept=".json,.csv"
             className="hidden"
+            onChange={e => handleFiles(e.target.files)}
           />
-          <Upload className={`w-12 h-12 mb-4 transition-colors ${dragOver ? 'text-primary' : 'text-text-muted'}`} />
-          <p className="text-text-secondary text-lg text-center">
-            {dragOver ? 'Slipp filen her' : 'Dra og slipp en JSON-fil, eller klikk for å velge'}
-          </p>
-          <p className="text-text-muted text-sm mt-2">Kun JSON-filer støttes</p>
-        </motion.div>
+        </div>
 
-        {/* Feilmelding */}
+        {/* Feil */}
         {error && (
-          <motion.div
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="card border-error flex items-center gap-3"
-          >
-            <AlertCircle className="w-5 h-5 text-error" />
+          <div className="card border-error flex items-start gap-3" role="alert">
+            <AlertCircle className="w-5 h-5 text-error flex-shrink-0 mt-0.5" />
             <span className="text-error">{error}</span>
+          </div>
+        )}
+
+        {/* Importert */}
+        {imported !== null && (
+          <motion.div initial={{ y: -10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="card border-success">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 className="w-6 h-6 text-success" />
+              <span className="text-success text-lg font-semibold">
+                {imported} spørsmål importert til spørsmålsbanken!
+              </span>
+            </div>
           </motion.div>
         )}
 
-        {/* Suksessmelding */}
-        {success && (
-          <motion.div
-            initial={{ y: -10, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="card border-success flex items-center gap-3"
-          >
-            <Check className="w-5 h-5 text-success" />
-            <span className="text-success">
-              {importedQuestions.length} spørsmål importert!
-            </span>
-          </motion.div>
-        )}
+        {/* Oppsummering før import */}
+        <AnimatePresence>
+          {valid.length + invalid.length + duplicates.length > 0 && imported === null && (
+            <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="card p-6">
+              <h2 className="font-display text-xl text-text-primary mb-4">Oppsummering</h2>
+              <div className="grid grid-cols-3 gap-3 mb-5">
+                <div className="text-center p-4 bg-success/10 rounded-xl">
+                  <div className="font-display text-3xl text-success">{valid.length}</div>
+                  <div className="text-text-secondary text-sm">gyldige</div>
+                </div>
+                <div className="text-center p-4 bg-error/10 rounded-xl">
+                  <div className="font-display text-3xl text-error">{invalid.length}</div>
+                  <div className="text-text-secondary text-sm">avvist</div>
+                </div>
+                <div className="text-center p-4 bg-bg-elevated rounded-xl">
+                  <div className="font-display text-3xl text-text-muted">{duplicates.length}</div>
+                  <div className="text-text-secondary text-sm">duplikater</div>
+                </div>
+              </div>
 
-        {/* Preview av importerte spørsmål */}
-        {importedQuestions.length > 0 && (
-          <motion.div
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            className="space-y-3"
-          >
-            <h2 className="font-display text-xl text-text-primary">Forhåndsvisning</h2>
-            <div className="max-h-[300px] overflow-y-auto space-y-2">
-              {importedQuestions.slice(0, 5).map((q, i) => (
-                <div key={i} className="card p-3">
-                  <p className="text-text-primary font-medium">{q.text}</p>
-                  <div className="flex gap-2 mt-2 text-xs text-text-secondary">
-                    <span className="capitalize">{q.difficulty}</span>
-                    <span>•</span>
-                    <span>{q.categories.join(', ')}</span>
-                    <span>•</span>
-                    <span>{q.choices.length} alternativer</span>
+              {invalid.length > 0 && (
+                <div className="mb-5">
+                  <h3 className="font-semibold text-error mb-2 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    Avviste spørsmål (hvorfor):
+                  </h3>
+                  <div className="max-h-48 overflow-y-auto space-y-2">
+                    {invalid.map((item, i) => (
+                      <div key={i} className="p-3 bg-error/5 rounded-lg border border-error/20">
+                        <p className="text-text-primary font-medium truncate">{item.preview || '(mangler tekst)'}</p>
+                        <ul className="text-error text-sm mt-1 list-disc list-inside">
+                          {item.issues.map(issue => (
+                            <li key={issue}>{issue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-              {importedQuestions.length > 5 && (
-                <p className="text-text-muted text-sm text-center">
-                  ... og {importedQuestions.length - 5} til
-                </p>
               )}
-            </div>
 
-            <div className="flex gap-4 justify-center">
-              <button onClick={handleSaveToGame} className="btn-primary text-lg px-8 py-4 flex items-center gap-2">
-                <Check className="w-5 h-5" />
-                Lagre og bruk
-              </button>
-            </div>
-          </motion.div>
-        )}
+              {duplicates.length > 0 && (
+                <div className="mb-5">
+                  <h3 className="font-semibold text-text-muted mb-2 flex items-center gap-2">
+                    <Trash2 className="w-4 h-4" />
+                    Duplikater i filen (hoppes over):
+                  </h3>
+                  <ul className="text-text-muted text-sm list-disc list-inside max-h-32 overflow-y-auto">
+                    {duplicates.map((text, i) => (
+                      <li key={i} className="truncate">{text}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
 
-        {/* Mal-nedlasting */}
-        <motion.div
-          initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="card"
-        >
-          <h2 className="font-display text-xl text-text-primary mb-4">Mal for import</h2>
-          <p className="text-text-secondary mb-4">
-            Last ned en mal for å se riktig format for spørsmålsimportering.
-          </p>
-          <button 
-            onClick={handleDownloadTemplate}
-            className="btn-secondary flex items-center gap-2"
-          >
-            <FileJson className="w-5 h-5" />
-            Last ned JSON-mal
-          </button>
-          <div className="mt-4 p-4 bg-bg-elevated rounded-xl">
-            <p className="text-text-muted text-sm mb-2">Format-krav:</p>
-            <ul className="text-text-muted text-sm space-y-1 list-disc list-inside">
-              <li>Spørsmål må være i et JSON-array</li>
-              <li>Hvert objekt må ha: id, text, type, difficulty, categories, choices, correctChoiceIds</li>
-              <li>type: "multiple_choice", "buzzer", eller "true_false"</li>
-              <li>difficulty: "lett", "middels", eller "vanskelig"</li>
-            </ul>
-          </div>
-        </motion.div>
+              {valid.length > 0 && (
+                <button
+                  onClick={handleImport}
+                  className="btn-primary w-full py-4 text-xl flex items-center justify-center gap-2"
+                >
+                  <Download className="w-6 h-6" />
+                  Importer {valid.length} spørsmål
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );

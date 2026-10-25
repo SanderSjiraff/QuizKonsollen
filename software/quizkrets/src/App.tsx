@@ -13,23 +13,31 @@ import ImportQuestions from './pages/ImportQuestions';
 import FetchFromAPI from './pages/FetchFromAPI';
 import QuestionSources from './pages/QuestionSources';
 import { saveQuizPreset } from './data/savedQuizzes';
-import type { Question } from './types';
+import type { QuizPreset, Difficulty } from './types';
+import type { GameConfig } from './hooks/useGameEngine';
 
 function App() {
   const game = useGameEngine();
 
-  const handleLoadPreset = (preset: { id: string; name: string; categories: string[]; difficulties: string[]; questionCount: number; categoryWeights: Record<string, number>; rounds: { mode: string; questionCount: number; timeLimit: number; pointsPerCorrect: number; pointsPerWrong: number; bonusForSpeed?: boolean }[] }) => {
-    // Update config with preset values
-    game.updateConfig({
-      selectedCategories: preset.categories,
-      selectedDifficulties: preset.difficulties as ('lett' | 'middels' | 'vanskelig')[],
-      questionCount: preset.questionCount,
-      gameMode: preset.rounds[0].mode as ('classic' | 'buzzer' | 'team'),
-      timePerQuestion: preset.rounds[0].timeLimit,
+  const handleLoadPreset = (preset: QuizPreset) => {
+    const round = preset.rounds[0];
+    // configUpdates sikrer at uttrekket bruker preset-verdiene umiddelbart.
+    game.startGame({
+      configUpdates: {
+        quizName: preset.name,
+        selectedCategories: preset.categories,
+        selectedDifficulties: preset.difficulties,
+        questionCount: preset.questionCount,
+        gameMode: round?.mode ?? 'classic',
+        timePerQuestion: round?.timeLimit ?? 20,
+        pointsPerCorrect: round?.pointsPerCorrect ?? 100,
+        pointsPerWrong: round?.pointsPerWrong ?? 0,
+        bonusForSpeed: round?.bonusForSpeed ?? false,
+      },
     });
-    // Navigate to lobby
-    game.startGame();
   };
+
+  const currentQuestion = game.questions[game.currentQuestionIndex];
 
   const renderScreen = () => {
     switch (game.screen) {
@@ -40,24 +48,33 @@ function App() {
           <QuizBuilder
             config={game.config}
             updateConfig={game.updateConfig}
+            getAvailability={game.getAvailability}
+            selectionError={game.selectionError}
+            onDismissSelectionError={game.clearSelectionError}
+            onStartWithReuse={() => game.startGame({ allowReuse: true })}
+            onFetchMore={() => game.navigateTo('fetch-from-api')}
             onBack={() => game.navigateTo('main-menu')}
-            onStart={() => game.startGame()}
+            onStart={(configUpdates?: Partial<GameConfig>) =>
+              game.startGame(configUpdates ? { configUpdates } : undefined)
+            }
             onSaveQuiz={() => {
-              // Save current config as a preset
-              const preset: import('./types').QuizPreset = {
+              const preset: QuizPreset = {
                 id: `custom-${Date.now()}`,
-                name: `Quiz ${new Date().toLocaleDateString('no-NO')}`,
+                name: game.config.quizName || `Quiz ${new Date().toLocaleDateString('no-NO')}`,
                 categories: game.config.selectedCategories,
-                difficulties: game.config.selectedDifficulties as ('lett' | 'middels' | 'vanskelig')[],
+                difficulties: game.config.selectedDifficulties as Difficulty[],
                 questionCount: game.config.questionCount,
                 categoryWeights: {},
-                rounds: [{
-                  mode: game.config.gameMode,
-                  questionCount: game.config.questionCount,
-                  timeLimit: game.config.timePerQuestion,
-                  pointsPerCorrect: 100,
-                  pointsPerWrong: 0,
-                }],
+                rounds: [
+                  {
+                    mode: game.config.gameMode,
+                    questionCount: game.config.questionCount,
+                    timeLimit: game.config.timePerQuestion,
+                    pointsPerCorrect: game.config.pointsPerCorrect,
+                    pointsPerWrong: game.config.pointsPerWrong,
+                    bonusForSpeed: game.config.bonusForSpeed,
+                  },
+                ],
               };
               saveQuizPreset(preset);
             }}
@@ -76,9 +93,13 @@ function App() {
           <GameSetup
             config={game.config}
             updateConfig={game.updateConfig}
+            getAvailability={game.getAvailability}
+            selectionError={game.selectionError}
+            onDismissSelectionError={game.clearSelectionError}
+            onStartWithReuse={() => game.startGame({ allowReuse: true })}
             onBack={() => game.navigateTo('main-menu')}
-            onStart={(questions: Question[]) => {
-              game.startGame(questions);
+            onStart={(configUpdates) => {
+              game.startGame({ configUpdates });
             }}
             onScoreboard={() => game.navigateTo('scoreboard')}
             onImportQuestions={() => game.navigateTo('fetch-from-api')}
@@ -105,23 +126,30 @@ function App() {
       case 'game-play':
         return (
           <GamePlay
-            question={game.questions[game.currentQuestionIndex]}
+            question={currentQuestion}
             currentQuestionIndex={game.currentQuestionIndex}
             totalQuestions={game.questions.length}
             players={game.config.players}
             scores={game.scores}
             gameMode={game.gameMode}
-            onAnswer={game.answerQuestion}
+            timePerQuestion={game.timePerQuestion}
+            onAnswer={game.registerAnswer}
+            onTimeout={() => game.finishCurrentQuestion(true)}
             onNextQuestion={game.nextQuestion}
             onQuit={game.resetGame}
+            questionAnswers={currentQuestion ? game.getQuestionAnswers(currentQuestion.id) : []}
           />
         );
       case 'results':
         return (
           <Results
-            players={game.config.players}
-            scores={game.scores}
-            onPlayAgain={game.playAgain}
+            rankedPlayers={game.rankedPlayers}
+            teamResults={game.teamResults}
+            questions={game.questions}
+            answers={game.getAnswers()}
+            quizName={game.config.quizName}
+            durationMs={game.getDurationMs()}
+            onPlayAgain={() => game.playAgain()}
             onMainMenu={game.resetGame}
             onBackToLobby={game.backToLobby}
           />
@@ -131,22 +159,18 @@ function App() {
       case 'question-sources':
         return <QuestionSources onBack={() => game.navigateTo('main-menu')} />;
       case 'fetch-from-api':
-        return <FetchFromAPI onBack={() => game.navigateTo('game-setup')} onImportComplete={(questions) => {
-          // Legg til i spørsmålsbanken
-          const existing = JSON.parse(localStorage.getItem('quizkrets_imported_questions') || '[]');
-          localStorage.setItem('quizkrets_imported_questions', JSON.stringify([...existing, ...questions]));
-          game.navigateTo('question-bank');
-        }} />;
+        return (
+          <FetchFromAPI
+            onBack={() => game.navigateTo('game-setup')}
+            onImportComplete={() => game.navigateTo('question-bank')}
+          />
+        );
       default:
         return <MainMenu onNavigate={game.navigateTo} />;
     }
   };
 
-  return (
-    <Layout>
-      {renderScreen()}
-    </Layout>
-  );
+  return <Layout>{renderScreen()}</Layout>;
 }
 
 export default App;

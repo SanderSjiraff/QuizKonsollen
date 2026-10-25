@@ -71,6 +71,9 @@ export default function Scoreboard({ onBack }: ScoreboardProps) {
   const bestScore = history.length > 0 ? Math.max(...history.flatMap(h => h.players.map(p => p.score))) : 0;
   const avgDuration = totalQuizzes > 0 ? Math.round(totalDuration / totalQuizzes) : 0;
 
+  /** Varighet er lagret i millisekunder (0 i gamle oppføringer). */
+  const formatMinutes = (ms: number) => (ms > 0 ? `${Math.max(1, Math.round(ms / 60000))} min` : '–');
+
   return (
     <div className="min-h-screen p-6 md:p-12">
       {/* Header */}
@@ -119,7 +122,7 @@ export default function Scoreboard({ onBack }: ScoreboardProps) {
           </div>
           <div className="card p-4 text-center">
             <Clock className="w-8 h-8 text-primary mx-auto mb-2" />
-            <div className="text-3xl font-display text-primary">{Math.round(avgDuration / 60)}m</div>
+            <div className="text-3xl font-display text-primary">{formatMinutes(avgDuration)}</div>
             <div className="text-text-secondary text-sm">Gjennomsnittlig tid</div>
           </div>
         </motion.div>
@@ -194,7 +197,7 @@ export default function Scoreboard({ onBack }: ScoreboardProps) {
                           <span>•</span>
                           <span className="flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            {Math.round(quiz.duration / 60)} min
+                            {formatMinutes(quiz.duration)}
                           </span>
                           <span>•</span>
                           <span>{quiz.totalQuestions} spørsmål</span>
@@ -229,7 +232,9 @@ export default function Scoreboard({ onBack }: ScoreboardProps) {
                     >
                       <h4 className="font-semibold text-text-secondary mb-3">Resultater</h4>
                       <div className="space-y-2">
-                        {sortedPlayers.map((player, pIndex) => (
+                        {sortedPlayers.map((player, pIndex) => {
+                          const correct = quiz.correctByPlayer?.[player.id];
+                          return (
                           <div key={player.id} className="flex items-center gap-3">
                             <div className="w-8 flex justify-center">
                               {getRankIcon(pIndex)}
@@ -239,9 +244,15 @@ export default function Scoreboard({ onBack }: ScoreboardProps) {
                               style={{ backgroundColor: player.color }}
                             />
                             <span className="flex-1 text-text-primary">{player.name}</span>
+                            {correct !== undefined && (
+                              <span className="text-text-secondary text-sm">
+                                {correct}/{quiz.totalQuestions} riktige
+                              </span>
+                            )}
                             <span className="font-display text-xl text-primary">{player.score}</span>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       <div className="mt-4 pt-4 border-t border-border flex justify-end">

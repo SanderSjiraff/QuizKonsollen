@@ -1,21 +1,61 @@
-import { motion } from 'framer-motion';
-import { Trophy, RotateCcw, Home, Crown, Medal, Award, ArrowLeft } from 'lucide-react';
-import type { Player } from '../types';
+import { useState } from 'react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import {
+  Trophy, RotateCcw, Home, Crown, Medal, Award, ArrowLeft,
+  CheckCircle2, XCircle, HelpCircle, Clock, Users, ChevronDown, ChevronUp,
+} from 'lucide-react';
+import type { Question } from '../types';
+import type { PlayerStats, TeamResult, AnswerRecord } from '../core/scoring';
 
 interface ResultsProps {
-  players: Player[];
-  scores: Record<number, number>;
+  rankedPlayers: PlayerStats[];
+  teamResults: TeamResult[];
+  questions: Question[];
+  answers: AnswerRecord[];
+  quizName: string;
+  durationMs: number;
   onPlayAgain: () => void;
   onMainMenu: () => void;
   onBackToLobby?: () => void;
 }
 
-export default function Results({ players, scores, onPlayAgain, onMainMenu, onBackToLobby }: ResultsProps) {
-  const sortedPlayers = [...players].sort((a, b) => {
-    const scoreA = scores[a.id] || 0;
-    const scoreB = scores[b.id] || 0;
-    return scoreB - scoreA;
-  });
+function formatDuration(ms: number): string {
+  if (!ms || ms <= 0) return '–';
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes} min ${seconds} sek` : `${seconds} sek`;
+}
+
+/** Stabelbar per spiller: riktig / feil / ubesvart. */
+function StatsBar({ stats }: { stats: PlayerStats }) {
+  const total = Math.max(1, stats.totalQuestions);
+  return (
+    <div className="flex h-4 rounded-full overflow-hidden bg-bg-elevated w-full max-w-md" role="img" aria-label={`${stats.correct} riktige, ${stats.wrong} feil, ${stats.unanswered} ubesvarte`}>
+      <div className="bg-success" style={{ width: `${(stats.correct / total) * 100}%` }} />
+      <div className="bg-error" style={{ width: `${(stats.wrong / total) * 100}%` }} />
+      <div className="bg-border/60" style={{ width: `${(stats.unanswered / total) * 100}%` }} />
+    </div>
+  );
+}
+
+export default function Results({
+  rankedPlayers,
+  teamResults,
+  questions,
+  answers,
+  quizName,
+  durationMs,
+  onPlayAgain,
+  onMainMenu,
+  onBackToLobby,
+}: ResultsProps) {
+  const reducedMotion = useReducedMotion();
+  const [showReview, setShowReview] = useState(false);
+
+  const winner = rankedPlayers[0];
+  const totalCorrect = rankedPlayers.reduce((s, p) => s + p.correct, 0);
+  const totalQuestionsAll = questions.length;
 
   const getRankIcon = (index: number) => {
     switch (index) {
@@ -26,114 +66,260 @@ export default function Results({ players, scores, onPlayAgain, onMainMenu, onBa
     }
   };
 
-  const maxScore = Math.max(...Object.values(scores), 1);
+  /** Svar per spiller for ett spørsmål (til gjennomgang). */
+  const answerFor = (questionId: string, playerId: number) =>
+    answers.find(a => a.questionId === questionId && a.playerId === playerId);
 
   return (
-    <div className="min-h-screen p-6 md:p-12 flex flex-col">
-      {/* Header */}
-      <motion.div
-        initial={{ y: -50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        className="text-center mb-12"
-      >
-        <Trophy className="w-20 h-20 text-primary mx-auto mb-4" />
-        <h1 className="tv-heading text-primary text-glow-primary">Resultater</h1>
-        <p className="text-text-secondary text-xl mt-2">Spillet er ferdig!</p>
-      </motion.div>
-
-      {/* Podium / Rangering */}
-      <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto w-full">
-        {/* Vinner (hvis det er noen spillere) */}
-        {sortedPlayers.length > 0 && (
-          <motion.div
-            initial={{ scale: 0.5, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.2, type: 'spring', stiffness: 200 }}
-            className="text-center mb-12"
+    <div className="min-h-screen p-6 md:p-10">
+      {/* Header med vinner */}
+      <div className="text-center mb-10">
+        <motion.div
+          initial={reducedMotion ? false : { scale: 0, rotate: -20 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', delay: 0.2 }}
+          className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-primary/15 border-4 border-primary mb-4"
+        >
+          <Trophy className="w-12 h-12 text-primary" />
+        </motion.div>
+        <motion.p
+          initial={reducedMotion ? false : { y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="text-text-secondary text-xl"
+        >
+          {quizName} • {formatDuration(durationMs)}
+        </motion.p>
+        <motion.h1
+          initial={reducedMotion ? false : { y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ delay: 0.1 }}
+          className="tv-heading text-primary"
+        >
+          {winner ? `${winner.playerName} vinner!` : 'Resultater'}
+        </motion.h1>
+        {winner && (
+          <motion.p
+            initial={reducedMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.25 }}
+            className="text-text-secondary text-2xl mt-2"
           >
-            <div
-              className="w-32 h-32 rounded-full mx-auto mb-4 flex items-center justify-center"
-              style={{
-                backgroundColor: sortedPlayers[0].color,
-                boxShadow: `0 0 40px ${sortedPlayers[0].color}60`,
-              }}
-            >
-              <Crown className="w-16 h-16 text-white" />
-            </div>
-            <h2 className="font-display text-4xl text-text-primary mb-2">
-              {sortedPlayers[0].name}
-            </h2>
-            <p className="font-display text-5xl text-primary text-glow-primary">
-              {scores[sortedPlayers[0].id] || 0} poeng
-            </p>
-            <p className="text-success text-xl mt-2 font-semibold">Vinner!</p>
-          </motion.div>
+            {winner.totalPoints} poeng • {winner.correct} av {winner.totalQuestions} riktige ({winner.accuracy} %)
+          </motion.p>
         )}
+      </div>
 
-        {/* Full rangering */}
-        <div className="w-full space-y-4">
-          {sortedPlayers.map((player, index) => {
-            const score = scores[player.id] || 0;
-            const barWidth = maxScore > 0 ? (score / maxScore) * 100 : 0;
-
-            return (
-              <motion.div
-                key={player.id}
-                initial={{ x: -100, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ delay: 0.3 + index * 0.1 }}
-                className="flex items-center gap-4"
-              >
-                {/* Rank */}
-                <div className="w-12 flex justify-center">
-                  {getRankIcon(index)}
+      {/* Lagresultater (team-modus) */}
+      {teamResults.length > 0 && (
+        <div className="max-w-4xl mx-auto mb-8">
+          <h2 className="font-display text-2xl text-text-primary mb-4 flex items-center gap-2">
+            <Users className="w-6 h-6 text-primary" />
+            Lagresultater
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {teamResults.map((team, index) => (
+              <div key={team.teamId} className="card p-5 border-2" style={{ borderColor: team.color }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-display text-xl" style={{ color: team.color }}>
+                    {index === 0 && <Crown className="inline w-5 h-5 mr-1 text-primary" />}
+                    {team.name}
+                  </span>
+                  <span className="font-display text-2xl text-primary">{team.totalPoints} p</span>
                 </div>
+                <StatsBar stats={{
+                  playerId: team.teamId,
+                  playerName: team.name,
+                  playerColor: team.color,
+                  correct: team.correct,
+                  wrong: team.wrong,
+                  unanswered: team.unanswered,
+                  answered: team.correct + team.wrong,
+                  totalQuestions: team.players[0]?.totalQuestions ?? 0,
+                  accuracy: team.accuracy,
+                  totalPoints: team.totalPoints,
+                  avgAnswerTimeMs: null,
+                }} />
+                <p className="text-text-secondary text-sm mt-2">
+                  {team.correct} riktige • {team.accuracy} % treffprosent
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-                {/* Spiller-info */}
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xl font-semibold text-text-primary">{player.name}</span>
-                    <span className="font-display text-2xl text-primary">{score}</span>
-                  </div>
-                  {/* Progress bar */}
-                  <div className="h-4 bg-bg-elevated rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full rounded-full"
-                      style={{ backgroundColor: player.color }}
-                      initial={{ width: 0 }}
-                      animate={{ width: `${barWidth}%` }}
-                      transition={{ delay: 0.5 + index * 0.1, duration: 0.8 }}
-                    />
-                  </div>
+      {/* Rangering av spillere */}
+      <div className="max-w-4xl mx-auto space-y-3 mb-10">
+        {rankedPlayers.map((stats, index) => (
+          <motion.div
+            key={stats.playerId}
+            initial={reducedMotion ? false : { x: -30, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            transition={{ delay: reducedMotion ? 0 : index * 0.08 }}
+            className={`card p-5 flex flex-col md:flex-row md:items-center gap-4 ${
+              index === 0 ? 'border-primary/50' : ''
+            }`}
+          >
+            <div className="flex items-center gap-4 md:w-56 flex-shrink-0">
+              {getRankIcon(index)}
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: stats.playerColor }} />
+                  <span className="font-display text-2xl text-text-primary">{stats.playerName}</span>
                 </div>
-              </motion.div>
-            );
-          })}
+                <span className="text-primary font-display text-3xl">{stats.totalPoints} p</span>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-2">
+              <StatsBar stats={stats} />
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary">
+                <span className="flex items-center gap-1">
+                  <CheckCircle2 className="w-4 h-4 text-success" /> {stats.correct} riktig
+                </span>
+                <span className="flex items-center gap-1">
+                  <XCircle className="w-4 h-4 text-error" /> {stats.wrong} feil
+                </span>
+                <span className="flex items-center gap-1">
+                  <HelpCircle className="w-4 h-4 text-text-muted" /> {stats.unanswered} ubesvart
+                </span>
+                <span className="flex items-center gap-1">
+                  <Clock className="w-4 h-4 text-primary" />
+                  {stats.avgAnswerTimeMs !== null
+                    ? `${(stats.avgAnswerTimeMs / 1000).toFixed(1)} sek i snitt`
+                    : 'Ingen svartid'}
+                </span>
+              </div>
+            </div>
+
+            <div className="text-center md:text-right flex-shrink-0">
+              <div className="font-display text-3xl text-text-primary">{stats.accuracy}%</div>
+              <div className="text-text-muted text-xs uppercase tracking-wide">treffprosent</div>
+            </div>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Totaler */}
+      <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
+        <div className="card p-4 text-center">
+          <div className="font-display text-3xl text-primary">{totalQuestionsAll}</div>
+          <div className="text-text-secondary text-sm">spørsmål</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="font-display text-3xl text-success">{totalCorrect}</div>
+          <div className="text-text-secondary text-sm">riktige svar totalt</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="font-display text-3xl text-text-primary">{rankedPlayers.length}</div>
+          <div className="text-text-secondary text-sm">spillere</div>
+        </div>
+        <div className="card p-4 text-center">
+          <div className="font-display text-3xl text-primary">{formatDuration(durationMs)}</div>
+          <div className="text-text-secondary text-sm">spilletid</div>
         </div>
       </div>
 
-      {/* Knapper */}
-      <motion.div
-        initial={{ y: 50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.8 }}
-        className="flex justify-center gap-6 mt-12 pb-8"
-      >
-        <button onClick={onPlayAgain} className="btn-primary text-xl flex items-center gap-3">
+      {/* Gjennomgang av spørsmål */}
+      <div className="max-w-4xl mx-auto mb-10">
+        <button
+          onClick={() => setShowReview(prev => !prev)}
+          className="btn-secondary w-full py-4 flex items-center justify-center gap-3 text-lg"
+          aria-expanded={showReview}
+        >
+          {showReview ? <ChevronUp className="w-6 h-6" /> : <ChevronDown className="w-6 h-6" />}
+          Gjennomgå spørsmålene ({questions.length})
+        </button>
+
+        <AnimatePresence>
+          {showReview && (
+            <motion.div
+              initial={reducedMotion ? false : { height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="space-y-4 mt-4">
+                {questions.map((question, qIndex) => {
+                  const correctChoice = question.choices.find(c => question.correctChoiceIds.includes(c.id));
+                  return (
+                    <div key={question.id} className="card p-5">
+                      <div className="flex items-start gap-3 mb-3">
+                        <span className="font-display text-primary text-xl flex-shrink-0">
+                          {qIndex + 1}.
+                        </span>
+                        <p className="text-text-primary font-medium text-lg">{question.text}</p>
+                      </div>
+                      <p className="text-success mb-3 ml-8">
+                        Riktig svar: <strong>{correctChoice?.text}</strong>
+                      </p>
+                      {question.explanation && (
+                        <p className="text-text-secondary ml-8 mb-3 italic">{question.explanation}</p>
+                      )}
+                      <div className="flex flex-wrap gap-2 ml-8">
+                        {rankedPlayers.map(player => {
+                          const record = answerFor(question.id, player.playerId);
+                          const choiceText = record?.choiceId
+                            ? question.choices.find(c => c.id === record.choiceId)?.text
+                            : null;
+                          return (
+                            <div
+                              key={player.playerId}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border ${
+                                !record || record.choiceId === null
+                                  ? 'border-border/50 text-text-muted bg-bg-elevated'
+                                  : record.isCorrect
+                                    ? 'border-success/50 text-success bg-success/10'
+                                    : 'border-error/50 text-error bg-error/10'
+                              }`}
+                              title={
+                                !record || record.choiceId === null
+                                  ? `${player.playerName}: ubesvart`
+                                  : `${player.playerName}: valgte «${choiceText}»`
+                              }
+                            >
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: player.playerColor }} />
+                              <span className="font-semibold">{player.playerName}</span>
+                              {!record || record.choiceId === null ? (
+                                <span>ubesvart</span>
+                              ) : record.isCorrect ? (
+                                <CheckCircle2 className="w-4 h-4" />
+                              ) : (
+                                <>
+                                  <span className="italic">«{choiceText}»</span>
+                                  <XCircle className="w-4 h-4" />
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
+      {/* Handlinger */}
+      <div className="max-w-4xl mx-auto flex flex-col md:flex-row gap-3">
+        <button onClick={onPlayAgain} className="btn-primary flex-1 py-4 text-xl flex items-center justify-center gap-2">
           <RotateCcw className="w-6 h-6" />
           Spill igjen
         </button>
         {onBackToLobby && (
-          <button onClick={onBackToLobby} className="btn-secondary text-xl flex items-center gap-3">
+          <button onClick={onBackToLobby} className="btn-secondary flex-1 py-4 text-xl flex items-center justify-center gap-2">
             <ArrowLeft className="w-6 h-6" />
             Tilbake til lobby
           </button>
         )}
-        <button onClick={onMainMenu} className="btn-secondary text-xl flex items-center gap-3">
+        <button onClick={onMainMenu} className="btn-secondary flex-1 py-4 text-xl flex items-center justify-center gap-2">
           <Home className="w-6 h-6" />
           Hovedmeny
         </button>
-      </motion.div>
+      </div>
     </div>
   );
 }
