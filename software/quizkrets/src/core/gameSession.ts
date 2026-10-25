@@ -37,8 +37,10 @@ export interface RegisterUnansweredParams {
 
 export class GameSession {
   private answers = new Map<string, AnswerRecord>();
-  private startedAt = Date.now();
+  private startedAt: number | null = null;
   private endedAt: number | null = null;
+  private pausedMs = 0;
+  private pauseStart: number | null = null;
 
   /** Unik nøkkel per (spørsmål, spiller). */
   private key(questionId: string, playerId: number): string {
@@ -119,13 +121,41 @@ export class GameSession {
     return scores;
   }
 
-  getStartTime(): number {
+  /** Start spillet (kalles når spilleren forlater lobbyen). */
+  start(): void {
+    if (this.startedAt === null) {
+      this.startedAt = Date.now();
+    }
+  }
+
+  getStartTime(): number | null {
     return this.startedAt;
   }
 
-  /** Faktisk spilletid i millisekunder. */
+  /** Faktisk spilletid i millisekunder, ekskludert pausetid. */
   getDurationMs(): number {
-    return (this.endedAt ?? Date.now()) - this.startedAt;
+    if (this.startedAt === null) return 0;
+    const end = this.endedAt ?? Date.now();
+    let duration = end - this.startedAt - this.pausedMs;
+    if (this.pauseStart !== null) {
+      duration -= (end - this.pauseStart);
+    }
+    return Math.max(0, duration);
+  }
+
+  /**Pause spillet og begynn å telle pausetid.  */
+  pause(): void {
+    if (this.pauseStart === null) {
+      this.pauseStart = Date.now();
+    }
+  }
+
+  /** Gjenoppta etter pause. */
+  resume(): void {
+    if (this.pauseStart !== null) {
+      this.pausedMs += Date.now() - this.pauseStart;
+      this.pauseStart = null;
+    }
   }
 
   endSession(): void {
@@ -137,7 +167,9 @@ export class GameSession {
   /** Tilbakestill (brukes ved "spill igjen" uten ny session). */
   reset(): void {
     this.answers.clear();
-    this.startedAt = Date.now();
+    this.startedAt = null;
     this.endedAt = null;
+    this.pausedMs = 0;
+    this.pauseStart = null;
   }
 }

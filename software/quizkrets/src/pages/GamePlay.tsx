@@ -19,6 +19,8 @@ interface GamePlayProps {
   onTimeout: () => void;
   onNextQuestion: () => void;
   onQuit: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
   /** Svar registrert så langt for gjeldende spørsmål. */
   questionAnswers: AnswerRecord[];
 }
@@ -38,6 +40,8 @@ export default function GamePlay({
   onTimeout,
   onNextQuestion,
   onQuit,
+  onPause,
+  onResume,
   questionAnswers,
 }: GamePlayProps) {
   const reducedMotion = useReducedMotion();
@@ -52,11 +56,17 @@ export default function GamePlay({
   const phaseRef = useRef<Phase>('answering');
   phaseRef.current = phase;
 
+  const isPausedRef = useRef(isPaused);
+  useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
+  const activePlayerIdRef = useRef(activePlayerId);
+  useEffect(() => { activePlayerIdRef.current = activePlayerId; }, [activePlayerId]);
+
   const isBuzzer = gameMode === 'buzzer' && players.length > 1;
 
   const timer = useTimer(() => {
     // Enkel timeout per spørsmål: alt som ikke er besvart registreres som ubesvart.
     if (phaseRef.current !== 'revealed') {
+      phaseRef.current = 'revealed';
       setPhase('revealed');
       onTimeout();
     }
@@ -69,9 +79,11 @@ export default function GamePlay({
     setLastFeedback(null);
     setIsPaused(false);
     if (isBuzzer) {
+      phaseRef.current = 'buzzing';
       setPhase('buzzing');
       setActivePlayerId(null);
     } else {
+      phaseRef.current = 'answering';
       setPhase('answering');
       const first = players[0];
       setActivePlayerId(first ? first.id : null);
@@ -86,23 +98,34 @@ export default function GamePlay({
     [questionAnswers]
   );
 
+  /** Ref som alltid peker på gjeldende spørsmål (slik at tastaturlisten ikke
+   * trenger å re-registreres når spørsmålet bytter). */
+  const questionRef = useRef(question);
+  useEffect(() => { questionRef.current = question; }, [question]);
+
   /** Fullfør spørsmålet og vis fasit. */
   const reveal = useCallback(() => {
     timer.stop();
+    phaseRef.current = 'revealed';  // synkron oppdatering slik at input-lytter ser riktig fase med én gang
     setPhase('revealed');
   }, [timer]);
 
-  /** Håndter at den aktive spilleren velger et svar. */
+  /** Håndter at den aktive spilleren velger et svar.
+   *
+   * Merk: Vi sjekker IKKE phase her, fordi React-state kan ligge et hendelses-
+   * løpet. GameSession (via onAnswer) har egen duplikatbeskyttelse som blokkerer
+   * dersom spilleren allerede har svart på det gjeldende spørsmålet. */
   const submitAnswer = useCallback(
     (playerId: number, choiceId: string) => {
-      if (phase === 'revealed' || isPaused) return;
-      if (answeredIds.has(playerId)) return; // duplikatbeskyttelse
+      if (isPausedRef.current) return;
+      if (answeredIds.has(playerId)) return;
+      if (!questionRef.current) return;
 
       const timeTaken = Date.now() - questionStartRef.current;
       const ok = onAnswer(playerId, choiceId, timeTaken);
       if (!ok) return;
 
-      const correct = question?.correctChoiceIds.includes(choiceId) ?? false;
+      const correct = questionRef.current.correctChoiceIds.includes(choiceId);
       setLastFeedback({ playerId, correct });
 
       if (isBuzzer) {
@@ -118,56 +141,83 @@ export default function GamePlay({
         }
       }
     },
-    [phase, isPaused, answeredIds, question, onAnswer, players, isBuzzer, reveal]
+    [answeredIds, onAnswer, players, isBuzzer, reveal]
   );
 
   /** Håndter buzz fra en spiller (buzzer-modus). */
   const handleBuzz = useCallback(
     (playerId: number) => {
-      if (phase !== 'buzzing' || isPaused) return;
+      if (phaseRef.current !== 'buzzing' || isPausedRef.current) return;
       const player = players.find(p => p.id === playerId);
       if (!player) return;
       setPhase('answering');
       setActivePlayerId(playerId);
     },
-    [phase, isPaused, players]
+    [players]
   );
 
+  const togglePause = useCallback(() => {
+    if (phaseRef.current === 'revealed') return;
+    setIsPaused(prev => {
+      const next = !prev;
+      if (next) {
+        timer.pause();
+        onPause?.();
+      } else {
+        timer.resume();
+        onResume?.();
+      }
+      return next;
+    });
+  }, [timer, onPause, onResume]);
+
+  // Refs til callback-funksjoner slik at tastaturlisten ALDRIV trenger å
+  // re-registreres (unngår race condition ved hurtige tastetrykk).
+  const submitAnswerRef = useRef(submitAnswer);
+  submitAnswerRef.current = submitAnswer;
+  const handleBuzzRef = useRef(handleBuzz);
+  handleBuzzRef.current = handleBuzz;
+  const togglePauseRef = useRef(togglePause);
+  togglePauseRef.current = togglePause;
+  const onNextQuestionRef = useRef(onNextQuestion);
+  onNextQuestionRef.current = onNextQuestion;
+
   // Generisk input: tastatur → GameInputEvent.
+  // Registreres én gang per spørsmål (avhenger kun av question?.id).
   useEffect(() => {
+    if (!question) return;
+
     const hub = new InputHub();
     const driver = new KeyboardDriver(() => ({
-      activePlayerId: activePlayerId ?? 1,
-      buzzMode: phase === 'buzzing',
-      choiceCount: question?.choices.length ?? 0,
+      activePlayerId: activePlayerIdRef.current ?? 1,
+      buzzMode: phaseRef.current === 'buzzing',
+      choiceCount: questionRef.current?.choices.length ?? 0,
       playerCount: players.length,
     }));
     hub.register(driver);
+    // Debounce neste-spørsmål for å unngå dobbeltrigging ved race conditions.
+    let nextDebounce = false;
     hub.start(event => {
-      if (isPaused) return;
-      if (event.type === 'PLAYER_ANSWER' && activePlayerId !== null) {
-        submitAnswer(activePlayerId, event.choiceId);
+      if (isPausedRef.current) return;
+      if (event.type === 'PLAYER_ANSWER' && activePlayerIdRef.current !== null) {
+        submitAnswerRef.current(activePlayerIdRef.current, event.choiceId);
       } else if (event.type === 'PLAYER_BUZZ') {
-        handleBuzz(event.playerId);
-      } else if (event.type === 'NEXT_QUESTION' && phase === 'revealed') {
-        onNextQuestion();
+        handleBuzzRef.current(event.playerId);
+      } else if (event.type === 'NEXT_QUESTION') {
+        if (phaseRef.current === 'revealed' && !nextDebounce) {
+          nextDebounce = true;
+          onNextQuestionRef.current();
+        }
       } else if (event.type === 'PAUSE_GAME') {
-        togglePause();
+        togglePauseRef.current();
       }
     });
-    return () => hub.stop();
+    return () => {
+      nextDebounce = false;
+      hub.stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePlayerId, phase, isPaused, question?.id, submitAnswer, handleBuzz, onNextQuestion]);
-
-  const togglePause = useCallback(() => {
-    if (phase === 'revealed') return;
-    setIsPaused(prev => {
-      const next = !prev;
-      if (next) timer.pause();
-      else timer.resume();
-      return next;
-    });
-  }, [phase, timer]);
+  }, [question?.id]);
 
   if (!question) {
     return (

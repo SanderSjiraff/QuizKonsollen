@@ -88,12 +88,36 @@ function readBank(): StoredQuestion[] {
   }
 }
 
+/** Forsøk å skrive banken til localStorage.
+ *  Ved kvantumbegrensning reduseres antallet gradvis og det gamle innholdet
+ *  returneres, slik at kalleren kan gi brukeren beskjed.
+ */
+export class StorageError extends Error {
+  constructor(message: string, public readonly preserved?: StoredQuestion[]) {
+    super(message);
+    this.name = 'StorageError';
+  }
+}
+
 function writeBank(bank: StoredQuestion[]): void {
+  const toWrite = bank.slice(-MAX_QUESTIONS);
   try {
-    // Beskytt gammel data: hvis ny skriving feiler (kvote), kast eldste importerte først.
-    localStorage.setItem(BANK_KEY, JSON.stringify(bank.slice(-MAX_QUESTIONS)));
+    localStorage.setItem(BANK_KEY, JSON.stringify(toWrite));
   } catch (error) {
+    const e = error as Error;
+    if (e.name === 'QuotaExceededError' || /quota|storage/i.test(e.message)) {
+      // Prøv aggressive pruning
+      const pruned = bank.slice(Math.max(0, Math.floor(bank.length / 2)));
+      try {
+        localStorage.setItem(BANK_KEY, JSON.stringify(pruned.slice(-MAX_QUESTIONS)));
+        throw new StorageError('Lagringskvoten er full – eldste spørsmål ble fjernet.', pruned);
+      } catch (inner) {
+        if (inner instanceof StorageError) throw inner;
+        throw new StorageError('Kunne ikke lagre spørsmålsbanken – lagringen er full.', []);
+      }
+    }
     console.error('Kunne ikke lagre spørsmålsbanken:', error);
+    throw new StorageError('Uventet lagringsfeil.');
   }
 }
 

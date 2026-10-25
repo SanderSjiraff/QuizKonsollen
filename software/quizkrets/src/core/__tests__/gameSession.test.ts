@@ -138,4 +138,38 @@ describe('GameSession', () => {
     session.endSession();
     expect(session.getDurationMs()).toBeGreaterThanOrEqual(0);
   });
+
+  it('start() setter spilletidspunkt', () => {
+    const session = new GameSession();
+    expect(session.getStartTime()).toBeNull();
+    expect(session.getDurationMs()).toBe(0);
+    session.start();
+    expect(session.getStartTime()).not.toBeNull();
+    expect(session.getDurationMs()).toBeGreaterThanOrEqual(0);
+  });
+
+  it('pause og resume justerer spilletid', async () => {
+    const session = new GameSession();
+    session.start();
+    const beforePause = session.getDurationMs();
+    session.pause();
+    await new Promise(r => setTimeout(r, 100));
+    session.resume();
+    const afterResume = session.getDurationMs();
+    // Pause-tiden (≈100ms) skal IKKE telle
+    expect(afterResume - beforePause).toBeLessThan(50);
+  });
+
+  it('reset nullstiller clock og svar', () => {
+    const session = new GameSession();
+    session.start();
+    session.registerAnswer(
+      { question, questionIndex: 0, roundIndex: 0, playerId: 1, choiceId: 'b', timeTakenMs: 1000 },
+      config
+    );
+    session.reset();
+    expect(session.getScores()[1]).toBeUndefined();
+    expect(session.getStartTime()).toBeNull();
+    expect(session.getDurationMs()).toBe(0);
+  });
 });

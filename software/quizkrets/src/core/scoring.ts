@@ -101,7 +101,7 @@ export function computePlayerStats(
     const correct = playerAnswers.filter(a => a.isCorrect).length;
     const answered = playerAnswers.filter(a => a.choiceId !== null).length;
     const wrong = answered - correct;
-    const unanswered = Math.max(0, totalQuestions - playerAnswers.length);
+    const unanswered = Math.max(0, totalQuestions - answered);
     const answeredTimes = playerAnswers
       .filter(a => a.choiceId !== null)
       .map(a => a.timeTakenMs);
@@ -126,7 +126,11 @@ export function computePlayerStats(
   });
 }
 
-/** Aggreger spillernes statistikk til lagresultater. */
+/** Aggreger spillernes statistikk til lagresultater.
+ *
+ * Når hver spiller svarer individuelt (hot-seat), er den totale mulige
+ * poengsummen antall spillere × antall spørsmål. accuracy vil da aldri
+ * overstige 100 %.  */
 export function computeTeamResults(
   teams: { id: number; name: string; color: string; playerIds: number[] }[],
   playerStats: PlayerStats[]
@@ -138,6 +142,7 @@ export function computeTeamResults(
     const unanswered = players.reduce((s, p) => s + p.unanswered, 0);
     const totalPoints = players.reduce((s, p) => s + p.totalPoints, 0);
     const totalQuestions = players[0]?.totalQuestions ?? 0;
+    const totalAnswerable = totalQuestions * Math.max(1, players.length);
 
     return {
       teamId: team.id,
@@ -147,7 +152,7 @@ export function computeTeamResults(
       correct,
       wrong,
       unanswered,
-      accuracy: totalQuestions > 0 ? Math.round((correct / totalQuestions) * 100) : 0,
+      accuracy: totalAnswerable > 0 ? Math.round((correct / totalAnswerable) * 100) : 0,
       players,
     };
   });

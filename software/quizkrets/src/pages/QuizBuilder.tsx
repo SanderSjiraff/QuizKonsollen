@@ -98,6 +98,16 @@ export default function QuizBuilder({
     updateConfig({ selectedCategories: newCategories });
   };
 
+  const setCategoryWeight = (categoryId: string, weight: number) => {
+    const current = config.categoryWeights ?? {};
+    if (weight <= 0) {
+      const { [categoryId]: _removed, ...rest } = current;
+      updateConfig({ categoryWeights: rest });
+    } else {
+      updateConfig({ categoryWeights: { ...current, [categoryId]: weight } });
+    }
+  };
+
   const toggleSubcategory = (subId: string) => {
     const newCategories = config.selectedCategories.includes(subId)
       ? config.selectedCategories.filter(c => c !== subId)
@@ -302,6 +312,37 @@ export default function QuizBuilder({
               )}
             </div>
           </div>
+
+          {/* Kategorivekting */}
+          {config.selectedCategories.length > 0 && (
+            <div className="card p-5">
+              <h2 className="font-display text-xl text-text-primary mb-4">2b. Kategorivekting (valgfritt)</h2>
+              <p className="text-text-muted text-sm mb-3">
+                Juster hvor mange spørsmål fra hver kategori. Uten vekter velges spørsmål tilfeldig blant alle valgte kategorier.
+              </p>
+              <div className="space-y-3">
+                {config.selectedCategories.map(catId => (
+                  <div key={catId} className="flex items-center gap-3">
+                    <span className="text-text-secondary text-sm w-24 truncate">{getCategoryName(catId)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={10}
+                      value={config.categoryWeights?.[catId] ?? 0}
+                      onChange={e => setCategoryWeight(catId, parseInt(e.target.value, 10))}
+                      className="flex-1 accent-primary"
+                      aria-label={`Vekt for ${getCategoryName(catId)}`}
+                    />
+                    <span className="text-primary font-display w-10 text-right">{config.categoryWeights?.[catId] ?? 0}%</span>
+                  </div>
+                ))}
+              </div>
+              {Object.keys(config.categoryWeights ?? {}).length === 0 && (
+                <p className="text-text-muted text-xs mt-2 italic">Ingen vekter satt – tilfeldig fordeling.</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Høyre kolonne: spillinnstillinger og oppsummering */}

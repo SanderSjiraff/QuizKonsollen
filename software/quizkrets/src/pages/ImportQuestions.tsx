@@ -100,7 +100,13 @@ function csvToDrafts(rows: string[][]): unknown[] {
     const letters = ['a', 'b', 'c', 'd', 'e', 'f'];
     const correctLetter = get('correct').toLowerCase();
     const choices = choicesRaw.map((text, i) => ({ id: letters[i], text }));
-    const correctId = letters[choicesRaw.indexOf(correctLetter)] ?? letters[0];
+    const correctIdx = letters.indexOf(correctLetter);
+    const correctId = correctIdx >= 0 && correctIdx < choices.length
+      ? letters[correctIdx]
+      : '';
+    if (correctId === '') {
+      throw new Error(`Ugyldig fasit-bokstav "${correctLetter}" for spørsmål: ${get('text').slice(0, 40)}...`);
+    }
 
     drafts.push({
       text: get('text'),

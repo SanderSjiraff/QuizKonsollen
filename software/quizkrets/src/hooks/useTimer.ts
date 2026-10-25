@@ -7,7 +7,7 @@
  *   doble timeout-hendelser ved overgang mellom spørsmål).
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 
 export function useTimer(onTimeUp?: () => void) {
   const [timeRemaining, setTimeRemaining] = useState(0);
@@ -93,5 +93,11 @@ export function useTimer(onTimeUp?: () => void) {
   /** Gjenstående tid i hele sekunder (til visning). */
   const secondsRemaining = Math.ceil(timeRemaining / 1000);
 
-  return { timeRemainingMs: timeRemaining, secondsRemaining, isRunning, start, pause, resume, stop };
+  // Stabil API slik at konsumenter (GamePlay) ikke får uendelige re-renders.
+  const api = useMemo(
+    () => ({ timeRemainingMs: timeRemaining, secondsRemaining, isRunning, start, pause, resume, stop }),
+    [timeRemaining, secondsRemaining, isRunning, start, pause, resume, stop]
+  );
+
+  return api;
 }

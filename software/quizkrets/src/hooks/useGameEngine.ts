@@ -28,6 +28,7 @@ import {
   type SelectionCriteria,
   type SelectionResult,
   selectQuestions,
+  selectDistributed,
   countAvailable,
 } from '../core/questionSelector';
 
@@ -61,6 +62,8 @@ export interface GameConfig {
   selectedCategories: string[];
   selectedDifficulties: string[];
   questionCount: number;
+  /** Vekter per kategori-ID (sum trenger ikke være 100). */
+  categoryWeights?: Record<string, number>;
   gameMode: GameMode;
   /** Sekunder per spørsmål. */
   timePerQuestion: number;
@@ -184,14 +187,19 @@ export function useGameEngine() {
       if (options?.questions && options.questions.length > 0) {
         selected = options.questions;
       } else {
-        const criteria: SelectionCriteria = {
+        const criteria: SelectionCriteria & { weights?: Record<string, number> } = {
           categories: effectiveConfig.selectedCategories,
           difficulties: effectiveConfig.selectedDifficulties as Difficulty[],
           count: effectiveConfig.questionCount,
           excludeIds: [...getUsedQuestionIds()],
           allowReuse: options?.allowReuse ?? false,
         };
-        const result: SelectionResult = selectQuestions(getQuestions(), criteria);
+        const hasWeights = effectiveConfig.categoryWeights &&
+          Object.keys(effectiveConfig.categoryWeights).length > 0 &&
+          effectiveConfig.selectedCategories.length > 0;
+        const result: SelectionResult = hasWeights
+          ? selectDistributed(getQuestions(), { ...criteria, weights: effectiveConfig.categoryWeights })
+          : selectQuestions(getQuestions(), criteria);
         if (!result.ok) {
           setSelectionError({
             requested: result.requested,
@@ -215,7 +223,16 @@ export function useGameEngine() {
   );
 
   const startGameplay = useCallback(() => {
+    sessionRef.current.start();
     setScreen('game-play');
+  }, []);
+
+  const pauseGame = useCallback(() => {
+    sessionRef.current.pause();
+  }, []);
+
+  const resumeGame = useCallback(() => {
+    sessionRef.current.resume();
   }, []);
 
   /**
@@ -410,6 +427,8 @@ export function useGameEngine() {
     getQuestionAnswers,
     getAnswers,
     getDurationMs,
+    pauseGame,
+    resumeGame,
     finishCurrentQuestion,
     nextQuestion,
     resetGame,

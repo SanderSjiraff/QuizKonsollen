@@ -137,6 +137,8 @@ function App() {
             onTimeout={() => game.finishCurrentQuestion(true)}
             onNextQuestion={game.nextQuestion}
             onQuit={game.resetGame}
+            onPause={game.pauseGame}
+            onResume={game.resumeGame}
             questionAnswers={currentQuestion ? game.getQuestionAnswers(currentQuestion.id) : []}
           />
         );

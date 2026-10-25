@@ -107,7 +107,7 @@ describe('computePlayerStats', () => {
     ];
     const stats = computePlayerStats(players, answers, 1);
     const anna = stats.find(s => s.playerId === 1)!;
-    expect(anna.unanswered).toBe(0); // svaret ER registrert…
+    expect(anna.unanswered).toBe(1); // registrert timeout teller som ubesvart
     expect(anna.answered).toBe(0); // …men ga ikke noe valgt svar
     expect(anna.correct).toBe(0);
     expect(anna.wrong).toBe(0);
