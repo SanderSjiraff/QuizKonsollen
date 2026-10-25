@@ -1,159 +1,324 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('QuizKrets - UI Testing', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:3000');
-  });
+/**
+ * Hovedflyter i QuizKrets.
+ *
+ * - Ingen hardkodede URL-er: baseURL kommer fra playwright.config.ts
+ *   (TEST_BASE_URL / TEST_PORT).
+ * - Ingen antagelser om 4 spillere: standardoppsettet er 1 spiller.
+ * - App-tilstand (localStorage) er fersk per test siden hver test får ny
+ *   browserkontekst.
+ */
 
-  test('Main Menu renders correctly', async ({ page }) => {
-    // Check title
+test.describe('Hovedmeny', () => {
+  test('viser alle navigasjonsvalg', async ({ page }) => {
+    await page.goto('/');
     await expect(page.getByText('QuizKrets')).toBeVisible();
-    
-    // Check navigation cards
-    await expect(page.getByText('Start spill')).toBeVisible();
-    await expect(page.getByText('Bygg quiz')).toBeVisible();
-    await expect(page.getByText('Spørsmålsbank')).toBeVisible();
-    
-    // Take screenshot
-    await page.screenshot({ path: 'tests/screenshots/01-main-menu.png', fullPage: true });
+
+    // Regex: hovedknappene inneholder også beskrivelsestekst i tilgjengelig navn
+    for (const label of [/Start spill/, /Bygg quiz/, /Spørsmålsbank/]) {
+      await expect(page.getByRole('button', { name: label }).first()).toBeVisible();
+    }
+    for (const label of [/Lagrede quizer/, /Poengtavle/, /Hent fra nettet/, /Spørsmålsideer/]) {
+      await expect(page.getByRole('button', { name: label }).first()).toBeVisible();
+    }
+  });
+});
+
+test.describe('Quizbygger', () => {
+  test('valg av temaer viser tilgjengelighet og oppsummering', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+
+    await expect(page.getByText('1. Temaer')).toBeVisible();
+
+    // Velg to hovedkategorier
+    await page.getByRole('button', { name: /Historie/ }).first().click();
+    await page.getByRole('button', { name: /Sport/ }).first().click();
+
+    // Tilgjengelighetsboks viser antall
+    await expect(page.getByText(/ubrukte spørsmål passer valgene dine/)).toBeVisible();
+
+    // Oppsummeringen oppdateres
+    await expect(page.getByText('Historie').first()).toBeVisible();
+    await expect(page.getByText(/Spillere/).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: /Start quiz/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Lagre quiz/ })).toBeVisible();
   });
 
-  test('Navigate to Quiz Builder', async ({ page }) => {
-    // Click "Bygg quiz"
-    await page.getByText('Bygg quiz').click();
-    
-    // Check we're on quiz builder page
-    await expect(page.getByText('Bygg din quiz')).toBeVisible();
-    
-    // Check sections
-    await expect(page.getByText('Velg temaer')).toBeVisible();
-    await expect(page.getByText('Vanskelighetsgrader')).toBeVisible();
-    await expect(page.getByText('Antall spørsmål')).toBeVisible();
-    
-    await page.screenshot({ path: 'tests/screenshots/02-quiz-builder.png', fullPage: true });
-  });
+  test('starter quiz med valgte kriterier', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
 
-  test('Select categories in Quiz Builder', async ({ page }) => {
-    await page.getByText('Bygg quiz').click();
-    
-    // Select some categories
-    await page.getByText('Historie').click();
-    await page.getByText('Sport').click();
-    await page.getByText('Teknologi').click();
-    
-    // Verify selection
-    await expect(page.getByText('Bekreft og fortsett')).toBeEnabled();
-    
-    await page.screenshot({ path: 'tests/screenshots/03-quiz-builder-categories.png', fullPage: true });
-  });
+    await page.getByRole('button', { name: /Historie/ }).first().click();
+    // 8 historie-spørsmål tilgjengelig – reduser antallet til 5 før start
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: /Start quiz/ }).click();
 
-  test('Navigate to Lobby', async ({ page }) => {
-    await page.getByText('Bygg quiz').click();
-    
-    // Select categories
-    await page.getByText('Historie').click();
-    await page.getByText('Sport').click();
-    
-    // Click start
-    await page.getByText('Bekreft og fortsett').click();
-    
-    // Wait for lobby to load
-    await page.waitForSelector('text=Spillerlobby', { timeout: 10000 });
-    
-    // Check lobby elements are present
     await expect(page.getByText('Spillerlobby')).toBeVisible();
-    
-    // Check player cards - look for input fields with player names
-    const playerInputs = await page.locator('input[value*="Spiller"]').all();
-    expect(playerInputs.length).toBeGreaterThan(0);
-    
-    await page.screenshot({ path: 'tests/screenshots/04-lobby.png', fullPage: true });
   });
 
-  test('Players can mark ready in Lobby', async ({ page }) => {
-    await page.getByText('Bygg quiz').click();
-    await page.getByText('Historie').click();
-    await page.getByText('Bekreft og fortsett').click();
-    
-    await page.waitForSelector('text=Spillerlobby', { timeout: 10000 });
-    
-    // Mark all players as ready
-    const readyButtons = await page.locator('button:has-text("Marker som klar")').all();
-    expect(readyButtons.length).toBe(4); // Should have 4 players
-    
-    for (let i = 0; i < readyButtons.length; i++) {
-      await readyButtons[i].click();
-      // Small delay between clicks to allow animations
-      await page.waitForTimeout(300);
+  test('underkategorier kan velges', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+
+    // Utvid Historie og velg underkategori
+    await page
+      .locator('button', { hasText: 'Underkategorier' })
+      .first()
+      .click();
+    await page.getByRole('button', { name: /Norsk historie/ }).click();
+
+    // Oppsummering viser 'Norsk historie'
+    await expect(page.getByText('Norsk historie').first()).toBeVisible();
+  });
+});
+
+test.describe('Full spillflyt (klassisk, 1 spiller)', () => {
+  test('start tilfeldig quiz, svar på alle spørsmål og se resultater med statistikk', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+
+    // GameSetup: reduser til 5 spørsmål
+    await expect(page.getByRole('heading', { name: 'Tilfeldig quiz' })).toBeVisible();
+    await page.getByLabel('Antall spørsmål').fill('5');
+
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+
+    // Lobby med 1 spiller
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+    await expect(page.getByText('1 spillere')).toBeVisible();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    // Svar på alle 5 spørsmålene
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
     }
-    
-    // Check that start button is enabled
-    await expect(page.getByText('Start spillet!')).toBeEnabled();
-    
-    await page.screenshot({ path: 'tests/screenshots/05-lobby-ready.png', fullPage: true });
+
+    // Resultater med full statistikk
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+    await expect(page.getByText('treffprosent')).toBeVisible();
+    await expect(page.getByText(/riktige svar totalt/)).toBeVisible();
+    await expect(page.getByRole('button', { name: /Gjennomgå spørsmålene/ })).toBeVisible();
   });
 
-  test('Game Play screen', async ({ page }) => {
-    // Navigate to game
-    await page.getByText('Bygg quiz').click();
-    await page.getByText('Historie').click();
-    await page.getByText('Bekreft og fortsett').click();
-    
-    await page.waitForSelector('text=Spillerlobby', { timeout: 10000 });
-    
-    // Mark all ready and start
-    const readyButtons = await page.locator('button:has-text("Marker som klar")').all();
-    for (let i = 0; i < readyButtons.length; i++) {
-      await readyButtons[i].click();
-      await page.waitForTimeout(300);
+  test('gjennomgang av spørsmål viser alle spørsmålene med fasit', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    for (let i = 0; i < 5; i++) {
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
     }
-    
-    await page.getByText('Start spillet!').click();
-    
-    // Wait for game screen
-    await page.waitForSelector('text=Spørsmål 1 /', { timeout: 10000 });
-    
-    // Check game screen
-    await expect(page.getByText('Spørsmål 1 /')).toBeVisible();
-    
-    await page.screenshot({ path: 'tests/screenshots/06-game-play.png', fullPage: true });
+
+    await page.getByRole('button', { name: /Gjennomgå spørsmålene/ }).click();
+    await expect(page.getByText('Riktig svar:')).toHaveCount(5);
   });
 
-  test('Question Bank page', async ({ page }) => {
-    await page.getByText('Spørsmålsbank').click();
-    
-    await expect(page.getByText('Spørsmålsbank')).toBeVisible();
-    await expect(page.getByPlaceholder('Søk etter spørsmål...')).toBeVisible();
-    
-    await page.screenshot({ path: 'tests/screenshots/07-question-bank.png', fullPage: true });
+  test('spill igjen returnerer til lobby med samme quiz', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    for (let i = 0; i < 5; i++) {
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+
+    await page.getByRole('button', { name: /Spill igjen/ }).click();
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
   });
 
-  test('Keyboard navigation works', async ({ page }) => {
-    // Test tab navigation
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    
-    // Should be on "Bygg quiz" button
-    const focusedElement = await page.evaluate(() => document.activeElement?.textContent);
-    expect(focusedElement).toContain('Bygg quiz');
+  test('ferdigspilt quiz lagres i historikken med faktiske data', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    for (let i = 0; i < 5; i++) {
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+    await page.getByRole('button', { name: /Hovedmeny/ }).click();
+
+    await page.getByRole('button', { name: /Poengtavle/ }).first().click();
+    // Historikken inneholder faktiske data: quiznavn og spilleresultat
+    await expect(page.getByText(/Tilfeldig quiz/).first()).toBeVisible();
+    await expect(page.getByText('Spiller 1').first()).toBeVisible();
+  });
+});
+
+test.describe('Tastaturnavigasjon under spill', () => {
+  test('svar med taster 1-4 og neste spørsmål med mellomrom', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      // Tasteinput: 1 = svaralternativ A
+      await page.keyboard.press('1');
+      await page.waitForSelector('[data-testid="next-question"]', { state: 'visible' });
+      // Mellomrom = neste spørsmål
+      await page.keyboard.press(' ');
+    }
+
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+  });
+});
+
+test.describe('Buzzer-modus', () => {
+  test('spiller buzzer med tast, svarer, og de andre får ubesvart', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+
+    // Velg buzzer-modus og 2 spillere ('Buzzer' eksakt – unngår 'Buzzer-duell'-kortet)
+    await page.getByRole('button', { name: 'Buzzer', exact: true }).click();
+    await page.getByLabel('Flere spillere').click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+    await expect(page.getByText('2 spillere')).toBeVisible();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      // Buzz-fase: spiller 2 buzzer med tasten 2
+      await expect(page.getByText(/Buzz når du kan!/)).toBeVisible();
+      await page.keyboard.press('2');
+      await expect(page.getByText(/svarer/)).toBeVisible();
+      // Svar med tasteinput A
+      await page.keyboard.press('a');
+      await page.locator('[data-testid="next-question"]').click();
+    }
+
+    // Resultater: begge spillerne har statistikk (ubesvart teller for den som ikke svarte)
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+    await expect(page.getByText(/ubesvart/).first()).toBeVisible();
+  });
+});
+
+test.describe('Streng spørsmålsuttrekk (ingen fallback)', () => {
+  // 'Generell kunnskap' har 4 lette/middle spørsmål i frøbanken –
+  // standardantallet er 10, så valgene kan ikke oppfylles.
+  const velgGenerellKunnskap = async (page: import('@playwright/test').Page) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+    await page.getByRole('button', { name: /Generell kunnskap/ }).click();
+    await page.getByRole('button', { name: /Start quiz/ }).click();
+  };
+
+  test('viser dialog med valg når valgene ikke kan oppfylles', async ({ page }) => {
+    await velgGenerellKunnskap(page);
+
+    // Dialogen viser tydelig beskjed og konkrete valg – aldri stille fallback
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText('Ikke nok spørsmål')).toBeVisible();
+    await expect(
+      dialog.getByRole('button', { name: /Reduser antallet til 4 spørsmål/ })
+    ).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Hent flere spørsmål fra nettet/ })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Avbryt/ })).toBeVisible();
+
+    // Avbryt: brukeren endrer selv valgene
+    await dialog.getByRole('button', { name: /Avbryt/ }).click();
+    await expect(dialog).toHaveCount(0);
+    // ...og blir værende i quizbyggeren
+    await expect(page.getByText('4. Oppsummering')).toBeVisible();
   });
 
-  test('Responsive design - mobile viewport', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 });
-    
-    await page.screenshot({ path: 'tests/screenshots/08-mobile-menu.png', fullPage: true });
-    
-    // Navigate to quiz builder
-    await page.getByText('Bygg quiz').click();
-    await page.screenshot({ path: 'tests/screenshots/09-mobile-builder.png', fullPage: true });
+  test('reduser antallet starter quizen med det som finnes', async ({ page }) => {
+    await velgGenerellKunnskap(page);
+
+    const dialog = page.getByRole('alertdialog');
+    await dialog.getByRole('button', { name: /Reduser antallet til 4 spørsmål/ }).click();
+
+    // Quiz med 4 spørsmål starter
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+    await expect(page.getByText('Spørsmål 1 av 4')).toBeVisible();
+  });
+});
+
+test.describe('Spørsmålsbank (CRUD)', () => {
+  const questionText = 'Hva er testspørsmålets hovedstad?';
+
+  test('oprett, rediger og slett spørsmål', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Spørsmålsbank/ }).click();
+
+    // Opprett
+    await page.getByRole('button', { name: /Nytt spørsmål/ }).click();
+    await page.getByPlaceholder('Skriv spørsmålet her…').fill(questionText);
+    await page.getByPlaceholder('Alternativ 1').fill('Testby');
+    await page.getByPlaceholder('Alternativ 2').fill('Annanby');
+    await page.getByPlaceholder('Alternativ 3').fill('Tredjeby');
+    await page.getByPlaceholder('Alternativ 4').fill('Fjerdeby');
+    await page
+      .locator('[role="dialog"] button', { hasText: /Sport/ })
+      .first()
+      .click();
+    await page.getByRole('button', { name: 'Legg til spørsmål' }).click();
+
+    await expect(page.getByText('Spørsmålet ble lagt til!')).toBeVisible();
+    // Vent til dialogen er helt lukket (avslutningsanimasjon) før vi leter i listen
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // Søk frem det nye spørsmålet
+    await page.getByLabel('Søk').fill('testspørsmålet');
+    await expect(page.getByText(questionText)).toBeVisible();
+
+    // Rediger
+    await page
+      .getByRole('button', { name: new RegExp(`Rediger spørsmålet: ${questionText.slice(0, 20)}`, 'i') })
+      .click();
+    await page.getByPlaceholder('Skriv spørsmålet her…').fill('Hva er den redigerte hovedstaden?');
+    await page.getByRole('button', { name: 'Lagre endringer' }).click();
+    await expect(page.getByText('Endringene er lagret!')).toBeVisible();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    // Finn det redigerte spørsmålet via søk
+    await page.getByLabel('Søk').fill('redigerte');
+    await expect(page.getByText('Hva er den redigerte hovedstaden?')).toBeVisible();
+
+    // Slett med bekreftelse
+    await page
+      .getByRole('button', { name: /Slett spørsmålet: Hva er den redigerte/ })
+      .click();
+    await page.getByRole('button', { name: 'Slett', exact: true }).click();
+    await expect(page.getByText('Spørsmålet er slettet.')).toBeVisible();
   });
 
-  test('TV viewport simulation', async ({ page }) => {
-    await page.setViewportSize({ width: 1920, height: 1080 });
-    
-    await page.screenshot({ path: 'tests/screenshots/10-tv-menu.png', fullPage: false });
-    
-    await page.getByText('Bygg quiz').click();
-    await page.screenshot({ path: 'tests/screenshots/11-tv-builder.png', fullPage: false });
+  test('duplikatkontroll avviser samme tekst', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Spørsmålsbank/ }).click();
+
+    // q1 i frøbanken har allerede denne teksten
+    await page.getByRole('button', { name: /Nytt spørsmål/ }).click();
+    await page.getByPlaceholder('Skriv spørsmålet her…').fill('Hva er hovedstaden i Australia?');
+    await page.getByPlaceholder('Alternativ 1').fill('Sydney');
+    await page.getByPlaceholder('Alternativ 2').fill('Canberra');
+    await page
+      .locator('[role="dialog"] button', { hasText: /Geografi/ })
+      .first()
+      .click();
+    await page.getByRole('button', { name: 'Legg til spørsmål' }).click();
+
+    // Duplikatet avvises med forklaring
+    await expect(page.getByText(/finnes allerede/)).toBeVisible();
   });
 });
