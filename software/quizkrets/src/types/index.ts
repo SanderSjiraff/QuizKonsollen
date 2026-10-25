@@ -73,29 +73,6 @@ export interface Team {
   playerIds: number[];
 }
 
-export interface GameState {
-  screen: Screen;
-  players: Player[];
-  teams: Team[];
-  currentRound: number;
-  currentQuestion: number;
-  questions: Question[];
-  scores: Record<number, number>;
-  answers: AnswerRecord[];
-  isPaused: boolean;
-  timeRemaining: number;
-  gameMode: GameMode;
-}
-
-export interface AnswerRecord {
-  questionId: string;
-  playerId: number;
-  choiceId: string;
-  isCorrect: boolean;
-  timeTaken: number;
-  points: number;
-}
-
 export interface AppSettings {
   soundEnabled: boolean;
   animationsEnabled: boolean;
