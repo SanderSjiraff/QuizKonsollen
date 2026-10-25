@@ -12,6 +12,7 @@ import {
   getCategoryName,
 } from '../core/categories';
 import { PLAYER_COLORS } from '../data/mockData';
+import { buildTeams } from '../core/teams';
 import SelectionErrorDialog from '../components/SelectionErrorDialog';
 import type { Difficulty, GameMode, Player } from '../types';
 
@@ -55,7 +56,6 @@ function buildPlayers(count: number, existing: Player[]): Player[] {
 }
 
 /** Bygg to lag fra spillernes teamId – felles logikk i core/teams (P1 #7). */
-import { buildTeams } from '../core/teams';
 
 export default function QuizBuilder({
   config,

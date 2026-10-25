@@ -54,11 +54,21 @@ Alle endringer nedenfor er verifisert med TDD (RED→GRØNN) og full test-suite.
       Scoreboard (de fem andre sidene hadde det allerede)
     - `aria-label="Bytt farge for <navn>"` på fargeknappen i Lobby
 
+13. **Feildialog fra «Lagrede quizer» (kodegjennomgang)**
+    - En lagret quiz banken ikke kan oppfylle feilet stille (ingenting skjedde).
+      SelectionErrorDialog er nå koblet inn i SavedQuizzes med
+      reduser/gjenbruk/hent-flere – samme mønster som GameSetup/QuizBuilder.
+    - `activePlayerIdRef` oppdateres synkront i submitAnswer/handleBuzz
+      (samme race-mønster som P1 #10), og togglePause har sideeffekter utenfor
+      state-updateren (StrictMode-sikker)
+
 #### Kjente forbedringspunkter (ikke blokkerende)
 
 - Import-suksessbekreftelsen vises aldri: `onImportComplete` navigerer
   umiddelbart tilbake, så «N spørsmål importert»-meldingen rekker aldri
   rendres synlig. Vurder bekreftelse på målsiden eller forsinket navigering.
+- Stille trunkering ved 5 000-spørsmålsgrensen i `questionStore`: import som
+  skyver banken over grensen mister de eldste spørsmålene uten varsel.
 
 ## Tidligere: P0-rettelser (v1.0 → v1.1)
 
@@ -91,7 +101,7 @@ Alle endringer nedenfor er verifisert med TDD (RED→GRØNN) og full test-suite.
 npm run test                    # 130 tester, alle grønne
 
 # E2E-tester (Playwright)
-npx playwright test tests/quizkrets.spec.ts   # 24 tester, alle grønne
+npx playwright test tests/quizkrets.spec.ts   # 25 tester, alle grønne
 
 # Produksjonsbygg
 npm run build                   # Vite, OK

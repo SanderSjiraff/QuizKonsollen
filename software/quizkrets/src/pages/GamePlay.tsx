@@ -143,6 +143,10 @@ export default function GamePlay({
         // Hot-seat: neste spiller som ikke har svart, ellers avslør.
         const next = players.find(p => !answeredIds.has(p.id) && p.id !== playerId);
         if (next) {
+          // Synkron ref-oppdatering (review-fiks, samme mønster som
+          // handleBuzz): to tastehendelser i samme bølge skal ikke
+          // registrere svaret på feil spiller.
+          activePlayerIdRef.current = next.id;
           setActivePlayerId(next.id);
         } else {
           reveal();
@@ -163,6 +167,7 @@ export default function GamePlay({
       // trykker samtidig på en flatsapp) begge passere vakten, og den siste
       // stjeler turvennen fra den første.
       phaseRef.current = 'answering';
+      activePlayerIdRef.current = playerId;
       setPhase('answering');
       setActivePlayerId(playerId);
     },
@@ -171,28 +176,29 @@ export default function GamePlay({
 
   const togglePause = useCallback(() => {
     if (phaseRef.current === 'revealed') return;
-    setIsPaused(prev => {
-      const next = !prev;
-      if (next) {
-        pausedAtRef.current = Date.now();
-        timer.pause();
-        onPause?.();
-      } else {
-        // P1 #10: ekskluder pausetiden fra svartiden, slik at hastighets-
-        // bonusen ikke straffes for tiden spillet sto i pause (nedtellingen
-        // står også stille i pausen).
-        if (pausedAtRef.current !== null) {
-          questionStartRef.current += Date.now() - pausedAtRef.current;
-          pausedAtRef.current = null;
-        }
-        timer.resume();
-        onResume?.();
+    // Review-fiks: sideeffekter holdes UTENFOR state-updateren – React 18
+    // StrictMode dobbeltinvokerer updatere i dev, og ref-mutasjoner der
+    // er skjøre. isPausedRef gir alltid gjeldende tilstand.
+    const next = !isPausedRef.current;
+    if (next) {
+      pausedAtRef.current = Date.now();
+      timer.pause();
+      onPause?.();
+    } else {
+      // P1 #10: ekskluder pausetiden fra svartiden, slik at hastighets-
+      // bonusen ikke straffes for tiden spillet sto i pause (nedtellingen
+      // står også stille i pausen).
+      if (pausedAtRef.current !== null) {
+        questionStartRef.current += Date.now() - pausedAtRef.current;
+        pausedAtRef.current = null;
       }
-      return next;
-    });
+      timer.resume();
+      onResume?.();
+    }
+    setIsPaused(next);
   }, [timer, onPause, onResume]);
 
-  // Refs til callback-funksjoner slik at tastaturlisten ALDRIV trenger å
+  // Refs til callback-funksjoner slik at tastaturlisten ALDRI trenger å
   // re-registreres (unngår race condition ved hurtige tastetrykk).
   const submitAnswerRef = useRef(submitAnswer);
   submitAnswerRef.current = submitAnswer;

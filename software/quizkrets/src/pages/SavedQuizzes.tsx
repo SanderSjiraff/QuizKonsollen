@@ -3,12 +3,24 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, Plus, Trash2, Play, Clock, Users, Tag } from 'lucide-react';
 import { getSavedQuizzes, deleteSavedQuiz } from '../data/savedQuizzes';
 import { SAMPLE_PRESETS } from '../data/mockData';
+import SelectionErrorDialog from '../components/SelectionErrorDialog';
+import type { SelectionError } from '../hooks/useGameEngine';
 import type { QuizPreset } from '../types';
 
 interface SavedQuizzesProps {
   onBack: () => void;
   onSelectQuiz: (preset: QuizPreset) => void;
   onCreateQuiz: () => void;
+  /** Review-fiks: banken kan ikke alltid oppfylle quizen – feilen må
+   * vises her også (samme dialog som GameSetup/QuizBuilder), ikke stille. */
+  selectionError: SelectionError | null;
+  categories: string[];
+  /** Difficulties fra config er string[] – dialogen aksepterer begge typer. */
+  difficulties: string[];
+  onDismissSelectionError: () => void;
+  onReduceCount: (newCount: number) => void;
+  onStartWithReuse: () => void;
+  onFetchMore: () => void;
 }
 
 // Kombinert quiz-type for visning
@@ -17,7 +29,18 @@ interface DisplayQuiz extends QuizPreset {
   createdAt?: string;
 }
 
-export default function SavedQuizzes({ onBack, onSelectQuiz, onCreateQuiz }: SavedQuizzesProps) {
+export default function SavedQuizzes({
+  onBack,
+  onSelectQuiz,
+  onCreateQuiz,
+  selectionError,
+  categories,
+  difficulties,
+  onDismissSelectionError,
+  onReduceCount,
+  onStartWithReuse,
+  onFetchMore,
+}: SavedQuizzesProps) {
   const [savedQuizzes, setSavedQuizzes] = useState<DisplayQuiz[]>([]);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -158,6 +181,20 @@ export default function SavedQuizzes({ onBack, onSelectQuiz, onCreateQuiz }: Sav
           )}
         </div>
       </div>
+
+      {/* Review-fiks: dialog når banken ikke kan oppfylle quizen –
+          samme mønster som GameSetup/QuizBuilder */}
+      {selectionError && (
+        <SelectionErrorDialog
+          error={selectionError}
+          categories={categories}
+          difficulties={difficulties}
+          onReduceCount={onReduceCount}
+          onAllowReuse={onStartWithReuse}
+          onFetchMore={onFetchMore}
+          onDismiss={onDismissSelectionError}
+        />
+      )}
     </div>
   );
 }

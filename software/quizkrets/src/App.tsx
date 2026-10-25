@@ -76,6 +76,15 @@ function App() {
             onBack={() => game.navigateTo('main-menu')}
             onSelectQuiz={handleLoadPreset}
             onCreateQuiz={() => game.navigateTo('quiz-builder')}
+            selectionError={game.selectionError}
+            categories={game.config.selectedCategories}
+            difficulties={game.config.selectedDifficulties}
+            onDismissSelectionError={game.clearSelectionError}
+            onReduceCount={newCount =>
+              game.startGame({ configUpdates: { questionCount: newCount } })
+            }
+            onStartWithReuse={() => game.startGame({ allowReuse: true })}
+            onFetchMore={() => game.navigateTo('fetch-from-api')}
           />
         );
       case 'game-setup':

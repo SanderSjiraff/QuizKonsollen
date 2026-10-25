@@ -602,6 +602,77 @@ test.describe('Tilgjengelighet på ikon-knapper (P2 #12)', () => {
   });
 });
 
+test.describe('Lagrede quizer: feil når banken ikke kan oppfylle (review-fiks)', () => {
+  test('utilstrekkelig bank gir feildialog fra Lagrede quizer – ikke stille feil', async ({ page }) => {
+    // Bank med kun 3 sport-spørsmål; lagret quiz krever 5
+    const bank = Array.from({ length: 3 }, (_, i) => ({
+      id: `saved-e2e-${i + 1}`,
+      text: `Sportspørsmål nummer ${i + 1}: hvem vant kamp ${i + 1}?`,
+      type: 'multiple_choice',
+      difficulty: 'lett',
+      categories: ['sport'],
+      choices: [
+        { id: 'a', text: `Lag ${i + 1}` },
+        { id: 'b', text: 'Ingen' },
+      ],
+      correctChoiceIds: ['a'],
+      source: 'manual',
+      sourceRef: 'E2E',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+    const savedQuiz = {
+      id: 'saved-e2e-quiz',
+      name: 'For liten bank-test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      preset: {
+        id: 'saved-e2e-quiz',
+        name: 'For liten bank-test',
+        categories: ['sport'],
+        difficulties: ['lett'],
+        questionCount: 5,
+        categoryWeights: {},
+        rounds: [
+          {
+            mode: 'classic',
+            questionCount: 5,
+            timeLimit: 20,
+            pointsPerCorrect: 100,
+            pointsPerWrong: 0,
+            bonusForSpeed: false,
+          },
+        ],
+      },
+    };
+    await page.addInitScript(
+      ({ bank, savedQuiz }) => {
+        localStorage.setItem('quizkrets_question_bank_v1', JSON.stringify(bank));
+        localStorage.setItem('quizkrets_question_bank_migrated_v1', 'done');
+        localStorage.setItem('quizkrets_used_question_ids', JSON.stringify([]));
+        localStorage.setItem('quizkrets_saved_quizzes', JSON.stringify([savedQuiz]));
+      },
+      { bank, savedQuiz }
+    );
+
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Lagrede quizer' }).click();
+
+    // Start quizen som krever 5 spørsmål med bare 3 tilgjengelige
+    const card = page.locator('.card', { hasText: 'For liten bank-test' });
+    await card.getByRole('button', { name: 'Spill' }).click();
+
+    // Brukeren skal få tydelig feil med valg – ikke stille ingenting
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/3 ubrukte spørsmål/)).toBeVisible();
+
+    // «Reduser antallet til 3» starter quizen med det som finnes
+    await dialog.getByRole('button', { name: /Reduser antallet til 3/ }).click();
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+  });
+});
+
 test.describe('Streng spørsmålsuttrekk (ingen fallback)', () => {
   // 'Generell kunnskap' har 4 lette/middle spørsmål i frøbanken –
   // standardantallet er 10, så valgene kan ikke oppfylles.

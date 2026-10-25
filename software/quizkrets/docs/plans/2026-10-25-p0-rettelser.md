@@ -37,8 +37,8 @@
 
 ## P1 #4–#10 (fullført)
 
-- **P1 #4** (commit 5a1f4a0): `statsBarFractions` i scoring.ts – lag-nevner er spillere × spørsmål; 3 nye enhetstester.
-- **P1 #5** (commit 5a1f4a0): kategorivekter lagres/gjenopprettes via `presetToConfigUpdates`; eksplisitte vekter i alle startstier; E2E med 100 % historie-vekt.
+- **P1 #4** (commit 5a1f401): `statsBarFractions` i scoring.ts – lag-nevner er spillere × spørsmål; 3 nye enhetstester.
+- **P1 #5** (commit 5a1f401): kategorivekter lagres/gjenopprettes via `presetToConfigUpdates`; eksplisitte vekter i alle startstier; E2E med 100 % historie-vekt.
 - **P1 #6** (commit 7019b3e): `backToLobby` oppretter alltid ny GameSession, nullstiller spørsmålsindeks og bumper answerVersion (avsluttet sesjon blokkerte nye svar via duplikatbeskyttelse; runde 2 startet på siste spørsmål). E2E RED→GRØNN.
 - **P1 #7** (commit 7019b3e): `buildTeams` flyttet til `core/teams.ts`; `startGame` sikrer konsistent lagstruktur uansett startpunkt (builder, lagret quiz, GameSetup); 4 enhetstester + E2E (Lag 1/Lag 2 vises fra GameSetup-start).
 - **P1 #8** (commit 7064a61): gjenbruksknapp i SelectionErrorDialog vises kun når gjenbruk faktisk kan dekke ønsket antall (tidligere felle → dialog-løkke); 2 E2E (RED→GRØNN).
@@ -64,3 +64,46 @@
 ## Verifikasjon P2 (total)
 
 - Enhetstester: 130/130 · E2E: 24/24 · TypeScript-bygg: OK
+
+## Uavhengig kodegjennomgang (etter P2 #13)
+
+Dom: **«With fixes»** – ingen Critical, to Important, åtte Minor. Behandling:
+
+### Important
+
+1. **`.agents/skills/**` i commit 2a5a686** (~12 000 linjer verktøydokumentasjon
+   i samme commit som P0 #1-fiksen). Kan kun rettes ved å omskrive Git-historikk
+   (forbudt uten godkjenning) → **rapportert til bruker for beslutning**
+   (forslag: `.gitignore` + ev. historieomskriving ved neste push-rydding).
+2. **Stille feil fra «Lagrede quizer»** når banken ikke kan oppfylle quizen
+   (startGame returnerte false uten dialog) → **fikset**: SelectionErrorDialog
+   er nå koblet inn i SavedQuizzes (samme mønster som GameSetup/QuizBuilder),
+   med reduser/gjenbruk/hent-flere-handlinger. E2E RED→GRØNN (dialog vises,
+   «Reduser antallet til 3» starter quizen).
+
+### Minor – fikset
+
+- QuizBuilder: `buildTeams`-import flyttet til toppen (sto midt i filen)
+- togglePause: sideeffekter flyttet ut av state-updateren (StrictMode-sikker)
+- `activePlayerIdRef` oppdateres synkront i submitAnswer (hot-seat) og
+  handleBuzz – samme mønster som P1 #10-phaseRef-fiksen
+- Planfil: SHA-typo `5a1f4a0` → `5a1f401`
+- GamePlay-kommentar: «ALDRIV» → «ALDRI»
+
+### Minor – vurdert og avvist (med begrunnelse)
+
+- **Enter/mellomrom på fokusert «Neste spørsmål»-knapp dobbelthopper**:
+  KeyboardDriver kaller `preventDefault()` på keydown for mellomrom/Enter,
+  som undertrykker knappens native aktivering – dobbeltrigging kan derfor
+  ikke oppstå. Et «skip-ved-fokusert-knapp»-vakt ville i stedet brutt
+  eksisterende atferd (mellomrom etter valgklikk med fokus på valgknappen).
+
+### Minor – notert som kjente forbedringspunkter
+
+- **Stille trunkering ved 5 000-spørsmålsgrensen** (questionStore): import som
+  skyver banken over grensen mister de eldste spørsmålene uten varsel. Vurder
+  eksplisitt `StorageError`/tilbakemelding når noe faktisk kuttes.
+- **Import-suksessbekreftelse vises aldri** (allerede dokumentert i AGENTS.md).
+
+Anbefaling fra reviewer om integrasjonstest av `startGame`-stier: delvis
+dekket av ny E2E for Lagrede quizer; full hook-test notert til senere.
