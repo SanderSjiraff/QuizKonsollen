@@ -199,6 +199,175 @@ describe('selectDistributed', () => {
     const ids = result.questions.map(q => q.id);
     expect(new Set(ids).size).toBe(3);
   });
+
+  // ---- Vektet fordeling (P0 #3) ----
+
+  /** Bank med n spørsmål per kategori (alle lette). */
+  function buildWeightedBank(counts: Record<string, number>): Question[] {
+    const bank: Question[] = [];
+    for (const [cat, n] of Object.entries(counts)) {
+      for (let i = 0; i < n; i++) {
+        bank.push(makeQuestion(`${cat}-${i}`, [cat], 'lett'));
+      }
+    }
+    return bank;
+  }
+
+  function countByCategory(questions: Question[]): Record<string, number> {
+    const counts: Record<string, number> = {};
+    for (const q of questions) {
+      // Hovedkategorien er alltid oppgitt i frødata/adaptere; bruk første
+      // kategori som deterministisk nøkkel for single-kategori-banker.
+      const key = q.categories[0];
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  it('vektet fordeling: 20 spørsmål med 50/30/20 gir 10/6/4', () => {
+    const bank = buildWeightedBank({ historie: 10, sport: 8, teknologi: 6 });
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'sport', 'teknologi'],
+      difficulties: [],
+      count: 20,
+      weights: { historie: 50, sport: 30, teknologi: 20 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.questions.length).toBe(20);
+    const counts = countByCategory(result.questions);
+    expect(counts.historie).toBe(10);
+    expect(counts.sport).toBe(6);
+    expect(counts.teknologi).toBe(4);
+  });
+
+  it('vektet fordeling med avrundingsrest: 7 spørsmål 50/30/20 gir 4/2/1', () => {
+    const bank = buildWeightedBank({ historie: 10, sport: 10, teknologi: 10 });
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'sport', 'teknologi'],
+      difficulties: [],
+      count: 7,
+      weights: { historie: 50, sport: 30, teknologi: 20 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.questions.length).toBe(7);
+    const counts = countByCategory(result.questions);
+    // Størrest-rest-metoden: 3.5/2.1/1.4 → 4/2/1 (sum = 7, ingen avrunding oppover 100 %)
+    expect(counts.historie).toBe(4);
+    expect(counts.sport).toBe(2);
+    expect(counts.teknologi).toBe(1);
+  });
+
+  it('hver kategori matches mot sine EGNE spørsmål, ikke alle valgte kategorier', () => {
+    const bank = buildWeightedBank({ historie: 10, sport: 30 });
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'sport'],
+      difficulties: [],
+      count: 10,
+      weights: { historie: 70, sport: 30 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.questions.length).toBe(10);
+    const counts = countByCategory(result.questions);
+    // 70 % av 10 = 7 historie – ikke en tilfeldig blanding av alle valgte kategorier
+    expect(counts.historie).toBe(7);
+    expect(counts.sport).toBe(3);
+  });
+
+  it('vekt på hovedkategori matcher spørsmål med underkategori', () => {
+    const bank = [
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeQuestion(`geo-sub-${i}`, ['geografi', 'verdensgeografi'], 'lett')
+      ),
+      ...Array.from({ length: 5 }, (_, i) => makeQuestion(`sport-${i}`, ['sport'], 'lett')),
+    ];
+    const result = selectDistributed(bank, {
+      categories: ['geografi', 'sport'],
+      difficulties: [],
+      count: 5,
+      weights: { geografi: 100, sport: 0 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const counts = countByCategory(result.questions);
+    expect(counts.geografi).toBe(5);
+    expect(counts.sport).toBeUndefined();
+  });
+
+  it('utilstrekkelig kategori-pool omfordeles til kategorier med kapasitet', () => {
+    // Sport har bare 3 av 6 ønskede – resten fordeles til teknologi (og historie,
+    // som er full etter 10). Forventet: 10 historie, 3 sport, 7 teknologi.
+    const bank = buildWeightedBank({ historie: 10, sport: 3, teknologi: 20 });
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'sport', 'teknologi'],
+      difficulties: [],
+      count: 20,
+      weights: { historie: 50, sport: 30, teknologi: 20 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.questions.length).toBe(20);
+    const counts = countByCategory(result.questions);
+    expect(counts.historie).toBe(10);
+    expect(counts.sport).toBe(3);
+    expect(counts.teknologi).toBe(7);
+  });
+
+  it('tom kategori-pool gir hele andelen til kategorien med spørsmål', () => {
+    const bank = buildWeightedBank({ historie: 12 });
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'teknologi'],
+      difficulties: [],
+      count: 6,
+      weights: { historie: 50, teknologi: 50 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.questions.length).toBe(6);
+    const counts = countByCategory(result.questions);
+    expect(counts.historie).toBe(6);
+    expect(counts.teknologi).toBeUndefined();
+  });
+
+  it('overlappende kategorier: spørsmål med flere kategorier velges kun én gang', () => {
+    const bank = [
+      ...Array.from({ length: 5 }, (_, i) => makeQuestion(`begge-${i}`, ['historie', 'sport'], 'lett')),
+      ...buildWeightedBank({ historie: 5, sport: 5 }),
+    ];
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'sport'],
+      difficulties: [],
+      count: 10,
+      weights: { historie: 50, sport: 50 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.questions.length).toBe(10);
+    const ids = result.questions.map(q => q.id);
+    expect(new Set(ids).size).toBe(10);
+    // Hvert valgte spørsmål tilhører minst én av de vektede kategoriene
+    for (const q of result.questions) {
+      expect(q.categories.some(c => c === 'historie' || c === 'sport')).toBe(true);
+    }
+  });
+
+  it('vekter med 0 ignoreres i fordelingen', () => {
+    const bank = buildWeightedBank({ historie: 10, sport: 10, teknologi: 10 });
+    const result = selectDistributed(bank, {
+      categories: ['historie', 'sport', 'teknologi'],
+      difficulties: [],
+      count: 10,
+      weights: { historie: 50, sport: 0, teknologi: 50 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const counts = countByCategory(result.questions);
+    expect(counts.historie).toBe(5);
+    expect(counts.teknologi).toBe(5);
+    expect(counts.sport).toBeUndefined();
+  });
 });
 
 describe('countAvailable', () => {

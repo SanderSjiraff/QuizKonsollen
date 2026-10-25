@@ -112,9 +112,120 @@ export function selectQuestions(all: Question[], criteria: SelectionCriteria): S
 }
 
 /**
+ * Vektet uttrekk: fordel `target` spørsmål over kategorier etter vekt.
+ *
+ * Egenskaper (P0 #3):
+ * - Eksakte kvoter via størrest-rest-metoden – kvotene summerer seg alltid
+ *   til target (f.eks. 50/30/20 av 20 → 10/6/4, aldri 11/6/4).
+ * - Hver kategori matches mot sine EGNE spørsmål (inkl. underkategorier),
+ *   ikke mot alle valgte kategorier.
+ * - Utilstrekkelig spørsmålsutvalg: udekkede kvoter omfordeles iterativt og
+ *   proporsjonalt (vektet fair queuing) til kategorier med kapasitet.
+ * - Overlappende kategorier: et spørsmål kan kun velges én gang (taken-settet).
+ */
+function selectWeighted(
+  pool: Question[],
+  weights: Record<string, number>,
+  target: number,
+  taken: Set<string>
+): Question[] {
+  // Gyldige vekter: verdien må være et tall > 0 (filteret leser VERDIEN,
+  // ikke kategorinavnet som nøkkel).
+  const entries = Object.entries(weights).filter(
+    (entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0
+  );
+  const totalWeight = entries.reduce((s, [, w]) => s + w, 0);
+  if (totalWeight <= 0 || target <= 0) return [];
+
+  // 1. Eksakte kvoter via størrest-rest-metoden: sum === target.
+  const raw = entries.map(([, w]) => (w / totalWeight) * target);
+  const quotas = raw.map(Math.floor);
+  const extra = target - quotas.reduce((a, b) => a + b, 0);
+  const byRemainder = raw
+    .map((r, i) => ({ i, frac: r - Math.floor(r) }))
+    .sort((a, b) => b.frac - a.frac || entries[b.i][1] - entries[a.i][1]);
+  for (let k = 0; k < extra && k < byRemainder.length; k++) {
+    quotas[byRemainder[k].i] += 1;
+  }
+
+  // 2. Per kategori: kategoriens egne spørsmål (inkl. underkategorier), stokket.
+  const pools = new Map<string, Question[]>();
+  for (const [cat] of entries) {
+    const own = expandSelection([cat]);
+    pools.set(cat, fisherYates(pool.filter(q => q.categories.some(c => own.has(c)))));
+  }
+
+  const selected: Question[] = [];
+  const remaining = quotas.slice();
+
+  // 3. Iterativ fylling: utilstrekkelige kvoter omfordeles til kategorier
+  //    med gjenværende kapasitet til alt er plassert eller poolen er tom.
+  let guard = 0;
+  let active = true;
+  while (active && guard++ < target + entries.length + 2) {
+    active = false;
+
+    // Fyll så mye som mulig per kategori (størst gjenstående kvote først,
+    // deterministisk rekkefølge).
+    const order = remaining
+      .map((n, i) => ({ n, i }))
+      .filter(x => x.n > 0)
+      .sort((a, b) => b.n - a.n || b.i - a.i);
+    for (const { n, i } of order) {
+      const catPool = pools.get(entries[i][0]) ?? [];
+      let placed = 0;
+      while (placed < n) {
+        const q = catPool.shift();
+        if (!q) break;
+        if (taken.has(q.id)) continue;
+        taken.add(q.id);
+        selected.push(q);
+        placed++;
+      }
+      remaining[i] = n - placed;
+      if (placed > 0) active = true;
+    }
+
+    const unmet = remaining.reduce((a, b) => a + b, 0);
+    if (unmet === 0) break;
+
+    // Gjenstående kapasitet per kategori (fraver valgte spørsmål).
+    const capacity = entries.map(
+      ([cat]) => (pools.get(cat) ?? []).filter(q => !taken.has(q.id)).length
+    );
+    if (capacity.every(c => c === 0)) break;
+
+    // Omfordel udekkede enheter med vektet fair queuing: mottaker med
+    // høyest vekt/(1 + allerede tildelt ekstra) får neste enhet.
+    const extraAlloc = entries.map(() => 0);
+    for (let u = 0; u < unmet; u++) {
+      let best = -1;
+      let bestScore = -1;
+      for (let i = 0; i < entries.length; i++) {
+        if (capacity[i] - extraAlloc[i] <= 0) continue;
+        const score = entries[i][1] / (1 + extraAlloc[i]);
+        if (score > bestScore) {
+          bestScore = score;
+          best = i;
+        }
+      }
+      if (best === -1) break;
+      extraAlloc[best] += 1;
+    }
+    for (let i = 0; i < entries.length; i++) remaining[i] += extraAlloc[i];
+  }
+
+  return selected;
+}
+
+/**
  * Velg spørsmål med fordeling over flere kategorier.
- * Fordeler antallet så jevn-som-mulig per kategori (roterende, ikke-proporsjonalt),
- * og blander rekkefølgen til slutt. Spørsmål med flere kategorier kan kun velges én gang.
+ *
+ * Med `weights` (kategori-ID → vekt) fordeles antallet proporsjonalt etter
+ * vekt med korrekt avrunding og omfordeling ved utilstrekkelig utvalg.
+ * Uten vekter fordeles antallet så jevnt som mulig per kategori (roterende),
+ * og blander rekkefølgen til slutt. Spørsmål med flere kategorier kan kun
+ * velges én gang.
  */
 export function selectDistributed(
   all: Question[],
@@ -144,27 +255,7 @@ export function selectDistributed(
   const target = criteria.count;
 
   if (criteria.weights && Object.keys(criteria.weights).length > 0) {
-    // Vektet fordeling: hver kategori får andel etter vekt, begrenset av tilgang.
-    const weightedCats = Object.entries(criteria.weights).filter(([w]) => Number(w) >= 0);
-    const totalWeight = weightedCats.reduce((s, [, w]) => s + w, 0);
-
-    if (totalWeight > 0) {
-      const expanded = expandSelection(criteria.categories);
-      for (const [categoryId, weight] of weightedCats) {
-        const share = Math.round((weight / totalWeight) * target);
-        if (share <= 0) continue;
-        const catPool = fisherYates(
-          pool.filter(q => !taken.has(q.id) && q.categories.some(c => {
-            const direct = expanded.has(categoryId) ? expanded.has(c) : false;
-            return direct || c === categoryId;
-          }))
-        );
-        for (const q of catPool.slice(0, share)) {
-          selected.push(q);
-          taken.add(q.id);
-        }
-      }
-    }
+    selected.push(...selectWeighted(pool, criteria.weights, target, taken));
   }
 
   // Fyll opp resten roterende per kategori for jevn fordeling.
