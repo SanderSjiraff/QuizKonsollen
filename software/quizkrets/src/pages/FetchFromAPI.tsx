@@ -7,7 +7,7 @@ import {
 import { openTdbProvider } from '../data/adapters/openTdbAdapter';
 import { triviaApiProvider } from '../data/adapters/triviaApiAdapter';
 import type { QuestionProvider } from '../data/adapters/types';
-import { addQuestions, getBankStats, deleteBySource, getAllQuestions, normalizeText } from '../data/questionStore';
+import { addQuestions, getBankStats, deleteBySource, getAllQuestions, normalizeText, StorageError } from '../data/questionStore';
 import { getCategoryName } from '../core/categories';
 import type { Question, Difficulty } from '../types';
 
@@ -112,12 +112,35 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
       setPreview([]);
       return;
     }
-    const result = addQuestions(newOnly, source, provider.licenseNote);
-    setStats(getBankStats());
-    setSuccess(`${result.added} spørsmål lagret i spørsmålsbanken!${result.duplicates > 0 ? ` (${result.duplicates} duplikater hoppet over)` : ''}`);
-    setPreview([]);
-    setPreviewDuplicates(new Set());
-    onImportComplete();
+    try {
+      const result = addQuestions(newOnly, source, provider.licenseNote);
+      setStats(getBankStats());
+      setSuccess(`${result.added} spørsmål lagret i spørsmålsbanken!${result.duplicates > 0 ? ` (${result.duplicates} duplikater hoppet over)` : ''}`);
+      setPreview([]);
+      setPreviewDuplicates(new Set());
+      onImportComplete();
+    } catch (error) {
+      // Lagringsfeil: banken er uendret – vis meldingen (inkl. eksport-hint).
+      setError(
+        error instanceof StorageError
+          ? error.message
+          : 'Uventet feil ved lagring. Eksisterende spørsmål er uendret.'
+      );
+    }
+  };
+
+  const handleDeleteBySource = (source: 'opentdb' | 'trivia-api') => {
+    try {
+      const removed = deleteBySource(source);
+      setStats(getBankStats());
+      setSuccess(`${removed} spørsmål fjernet.`);
+    } catch (error) {
+      setError(
+        error instanceof StorageError
+          ? error.message
+          : 'Uventet feil ved sletting. Eksisterende spørsmål er uendret.'
+      );
+    }
   };
 
   return (
@@ -408,11 +431,7 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
                 return (
                   <button
                     key={source}
-                    onClick={() => {
-                      const removed = deleteBySource(source);
-                      setStats(getBankStats());
-                      setSuccess(`${removed} spørsmål fjernet.`);
-                    }}
+                    onClick={() => handleDeleteBySource(source)}
                     className="text-error hover:underline text-sm flex items-center gap-1"
                   >
                     <Trash2 className="w-4 h-4" />

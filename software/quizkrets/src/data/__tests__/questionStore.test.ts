@@ -3,22 +3,68 @@ import { beforeEach, describe, it, expect } from 'vitest';
 /** Minimal localStorage-implementasjon for node-miljø. */
 class LocalStorageMock {
   private store = new Map<string, string>();
+  /** Feil som kastes fra setItem (én gang eller alle videre kall). */
+  private failError: Error | null = null;
+  private failAll = false;
+  /** Simuler delvis lagring: neste array-skrivning beholder kun N elementer. */
+  private truncateNext: number | null = null;
+
   getItem(key: string): string | null {
     return this.store.get(key) ?? null;
   }
   setItem(key: string, value: string): void {
-    this.store.set(key, String(value));
+    if (this.failError) {
+      const err = this.failError;
+      if (!this.failAll) this.failError = null;
+      throw err;
+    }
+    let v = String(value);
+    if (this.truncateNext !== null) {
+      try {
+        const parsed = JSON.parse(v);
+        if (Array.isArray(parsed)) v = JSON.stringify(parsed.slice(0, this.truncateNext));
+      } catch {
+        // Ikke en JSON-array – skriv uendret
+      }
+      this.truncateNext = null;
+    }
+    this.store.set(key, v);
   }
   removeItem(key: string): void {
     this.store.delete(key);
   }
   clear(): void {
     this.store.clear();
+    this.failError = null;
+    this.failAll = false;
+    this.truncateNext = null;
+  }
+
+  /** Få neste setItem til å kaste (f.eks. QuotaExceededError). */
+  failNextSet(error: Error): void {
+    this.failError = error;
+    this.failAll = false;
+  }
+  /** Få ALLE videre setItem til å kaste (full kvote). */
+  failAllSets(error: Error): void {
+    this.failError = error;
+    this.failAll = true;
+  }
+  /** Simuler at neste array-skrivning mister alt etter de N første elementene. */
+  truncateNextArrayWrite(n: number): void {
+    this.truncateNext = n;
   }
 }
 
 const storage = new LocalStorageMock();
 (globalThis as Record<string, unknown>).localStorage = storage;
+
+/** Simulert QuotaExceededError slik nettleseren kaster den. */
+function quotaError(): Error {
+  const e = new Error('QuotaExceededError: The quota has been exceeded.');
+  e.name = 'QuotaExceededError';
+  return e;
+}
 
 import {
   getAllQuestions,
@@ -31,6 +77,7 @@ import {
   contentHash,
   getQuestionsNeedingReview,
   initQuestionBank,
+  StorageError,
   type StoredQuestion,
 } from '../questionStore';
 import type { Question } from '../../types';
@@ -162,5 +209,114 @@ describe('questionStore', () => {
     expect(migrated!.categories).toContain('gaming');
     // og underkategori gir automatisk hovedkategori
     expect(migrated!.categories).toContain('underholdning');
+  });
+});
+
+describe('Lagringssikkerhet (P0): aldri automatisk sletting ved feil', () => {
+  const BANK_KEY = 'quizkrets_question_bank_v1';
+  const MIGRATED_KEY = 'quizkrets_question_bank_migrated_v1';
+  const LEGACY_KEY = 'quizkrets_imported_questions';
+
+  it('bevarer eksisterende bank urørt ved kvotefeil og kaster tydelig StorageError', () => {
+    addQuestions([makeQuestion('q-behold', 'Tekst som må overleve')], 'manual');
+    const bankFør = storage.getItem(BANK_KEY);
+
+    storage.failNextSet(quotaError());
+    expect(() => addQuestions([makeQuestion('q-ny', 'Nytt spørsmål')], 'manual')).toThrow(
+      StorageError
+    );
+
+    // Ingen automatisk sletting: banken er byte-identisk med før feilen.
+    expect(storage.getItem(BANK_KEY)).toBe(bankFør);
+  });
+
+  it('feilmeldingen sier at data er uendret og peker på eksport', () => {
+    storage.failNextSet(quotaError());
+    let message = '';
+    try {
+      addQuestions([makeQuestion('q-ny', 'Nytt spørsmål')], 'manual');
+      expect.unreachable('addQuestions skulle kastet StorageError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StorageError);
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/ikke lagret/i);
+    expect(message).toMatch(/eksisterende spørsmål er uendret/i);
+    expect(message).toMatch(/eksport/i);
+  });
+
+  it('oppdatering og sletting kaster ved kvotefeil uten å endre data', () => {
+    addQuestions([makeQuestion('q1', 'Opprinnelig tekst')], 'manual');
+    const bankFør = storage.getItem(BANK_KEY);
+
+    storage.failNextSet(quotaError());
+    expect(() => updateQuestion('q1', { text: 'Endret tekst' })).toThrow(StorageError);
+
+    storage.failNextSet(quotaError());
+    expect(() => deleteQuestion('q1')).toThrow(StorageError);
+
+    expect(storage.getItem(BANK_KEY)).toBe(bankFør);
+    // Opprinnelig tekst er fortsatt i banken
+    expect(getAllQuestions().some(q => q.id === 'q1' && q.text === 'Opprinnelig tekst')).toBe(true);
+  });
+
+  it('migrering ved full kvote: krasjer ikke, flagg settes IKKE, legacy og bank bevares', () => {
+    // Nullstill til umigrert tilstand med eksisterende bank + legacy-data
+    storage.clear();
+    const eksisterende = {
+      ...makeQuestion('eksisterende-1', 'Eksisterende bankspørsmål'),
+      source: 'manual',
+      sourceRef: 'Test',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const legacy = makeQuestion('legacy-1', 'Legacy importspørsmål');
+    storage.setItem(BANK_KEY, JSON.stringify([eksisterende]));
+    storage.setItem(LEGACY_KEY, JSON.stringify([legacy]));
+
+    // Full kvote: alle skrivinger feiler
+    storage.failAllSets(quotaError());
+
+    // Oppstart må ikke krasje selv om migreringen ikke kan fullføres –
+    // ellers får brukeren aldri eksportert dataene sine.
+    expect(() => initQuestionBank()).not.toThrow();
+
+    // Migreringen er IKKE markert som fullført (prøves igjen neste oppstart)
+    expect(storage.getItem(MIGRATED_KEY)).toBeNull();
+    // Legacy-nøkkelen er fortsatt intakt (ingen opprydding før verifisert lagring)
+    expect(JSON.parse(storage.getItem(LEGACY_KEY)!)).toHaveLength(1);
+    // Eksisterende bank er urørt
+    const bankEtter = JSON.parse(storage.getItem(BANK_KEY)!);
+    expect(bankEtter).toHaveLength(1);
+    expect(bankEtter[0].text).toBe('Eksisterende bankspørsmål');
+  });
+
+  it('migrering markeres ikke som fullført før alle data er verifisert lagret', () => {
+    storage.clear();
+    const legacy1 = makeQuestion('legacy-1', 'Legacy nummer én');
+    const legacy2 = makeQuestion('legacy-2', 'Legacy nummer to');
+    storage.setItem(LEGACY_KEY, JSON.stringify([legacy1, legacy2]));
+
+    // Simuler delvis lagring: neste array-skrivning mister data
+    storage.truncateNextArrayWrite(1);
+
+    initQuestionBank();
+
+    // Flagget skal IKKE være satt når lagringen ikke kunne verifiseres
+    expect(storage.getItem(MIGRATED_KEY)).toBeNull();
+  });
+
+  it('normal migrering fullføres og flagg settes', () => {
+    storage.clear();
+    const legacy = makeQuestion('legacy-ok', 'Legacy som skal migreres');
+    storage.setItem(LEGACY_KEY, JSON.stringify([legacy]));
+
+    initQuestionBank();
+
+    expect(storage.getItem(MIGRATED_KEY)).toBe('done');
+    // Legacy-data er kommet inn i banken
+    expect(getAllQuestions().some(q => q.text === 'Legacy som skal migreres')).toBe(true);
+    // Legacy-nøkkelen er ryddet bort etter verifisert lagring
+    expect(storage.getItem(LEGACY_KEY)).toBeNull();
   });
 });

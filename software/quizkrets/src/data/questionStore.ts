@@ -88,12 +88,15 @@ function readBank(): StoredQuestion[] {
   }
 }
 
-/** Forsøk å skrive banken til localStorage.
- *  Ved kvantumbegrensning reduseres antallet gradvis og det gamle innholdet
- *  returneres, slik at kalleren kan gi brukeren beskjed.
+/**
+ * Feil fra persistenslaget. Kastes når en lagring IKKE kunne gjennomføres.
+ *
+ * Viktig garanti (P0): Eksisterende lagrede data er ALLTID uendret når denne
+ * feilen kastes – questionStore sletter eller overskriver aldri data ved
+ * lagringsfeil. Brukeren får feilmeldingen og kan eksportere banken selv.
  */
 export class StorageError extends Error {
-  constructor(message: string, public readonly preserved?: StoredQuestion[]) {
+  constructor(message: string) {
     super(message);
     this.name = 'StorageError';
   }
@@ -105,19 +108,31 @@ function writeBank(bank: StoredQuestion[]): void {
     localStorage.setItem(BANK_KEY, JSON.stringify(toWrite));
   } catch (error) {
     const e = error as Error;
-    if (e.name === 'QuotaExceededError' || /quota|storage/i.test(e.message)) {
-      // Prøv aggressive pruning
-      const pruned = bank.slice(Math.max(0, Math.floor(bank.length / 2)));
-      try {
-        localStorage.setItem(BANK_KEY, JSON.stringify(pruned.slice(-MAX_QUESTIONS)));
-        throw new StorageError('Lagringskvoten er full – eldste spørsmål ble fjernet.', pruned);
-      } catch (inner) {
-        if (inner instanceof StorageError) throw inner;
-        throw new StorageError('Kunne ikke lagre spørsmålsbanken – lagringen er full.', []);
-      }
-    }
-    console.error('Kunne ikke lagre spørsmålsbanken:', error);
-    throw new StorageError('Uventet lagringsfeil.');
+    const isQuota = e.name === 'QuotaExceededError' || /quota|storage/i.test(e.message);
+    // ALDRI automatisk sletting: hvis lagringen feiler, er det gamle
+    // innholdet i localStorage fortsatt intakt og uendret. Kast tydelig
+    // feil med instruks om eksport, slik at brukeren selv kan sikre dataene.
+    throw new StorageError(
+      isQuota
+        ? 'Lagringskvoten er full – endringen ble ikke lagret, og eksisterende spørsmål er uendret. Eksporter spørsmålsbanken (Spørsmålsbank → Eksporter), rydd opp i nettleserens lagring, og prøv igjen.'
+        : `Uventet lagringsfeil – endringen ble ikke lagret, og eksisterende spørsmål er uendret. Eksporter spørsmålsbanken som backup. (${e.message})`
+    );
+  }
+}
+
+/**
+ * Verifiser at alle spørsmål faktisk er lagret i localStorage.
+ * Migreringen markeres aldri som fullført uten denne verifikasjonen.
+ */
+function verifyPersisted(expected: StoredQuestion[]): void {
+  const toVerify = expected.slice(-MAX_QUESTIONS);
+  const stored = readBank();
+  const storedIds = new Set(stored.map(q => q.id));
+  const missing = toVerify.filter(q => !storedIds.has(q.id));
+  if (missing.length > 0) {
+    throw new StorageError(
+      `Lagringskontroll feilet: ${missing.length} av ${toVerify.length} spørsmål kunne ikke verifiseres lagret.`
+    );
   }
 }
 
@@ -131,42 +146,57 @@ export function initQuestionBank(): void {
   let bank = readBank();
 
   if (localStorage.getItem(MIGRATED_KEY) !== 'done') {
-    const now = new Date().toISOString();
+    try {
+      const now = new Date().toISOString();
 
-    // 1. Innebygde eksempelspørsmål (bevarer originale IDer som q1, q2, ...)
-    const existingIds = new Set(bank.map(q => q.id));
-    const seedQuestions: StoredQuestion[] = QUESTIONS.map(q => {
-      const categories = migrateCategories(q.categories);
-      return {
-        ...q,
-        categories,
-        source: 'seed' as const,
-        sourceRef: 'Innebygde spørsmål',
-        createdAt: now,
-        updatedAt: now,
-        needsReview: categories.includes(UNRESOLVED_CATEGORY),
-      };
-    }).filter(q => !existingIds.has(q.id));
+      // 1. Innebygde eksempelspørsmål (bevarer originale IDer som q1, q2, ...)
+      const existingIds = new Set(bank.map(q => q.id));
+      const seedQuestions: StoredQuestion[] = QUESTIONS.map(q => {
+        const categories = migrateCategories(q.categories);
+        return {
+          ...q,
+          categories,
+          source: 'seed' as const,
+          sourceRef: 'Innebygde spørsmål',
+          createdAt: now,
+          updatedAt: now,
+          needsReview: categories.includes(UNRESOLVED_CATEGORY),
+        };
+      }).filter(q => !existingIds.has(q.id));
 
-    // 2. Gammel OTDB-cache → nye stabile IDer
-    const legacyOtdb = readLegacyQuestions(LEGACY_KEYS.otdbCache, 'opentdb', 'Open Trivia DB');
+      // 2. Gammel OTDB-cache → nye stabile IDer
+      const legacyOtdb = readLegacyQuestions(LEGACY_KEYS.otdbCache, 'opentdb', 'Open Trivia DB');
 
-    // 3. Gammel importert-liste → nye stabile IDer
-    const legacyImported = readLegacyQuestions(LEGACY_KEYS.imported, 'import', 'Filimport (gammel)');
+      // 3. Gammel importert-liste → nye stabile IDer
+      const legacyImported = readLegacyQuestions(LEGACY_KEYS.imported, 'import', 'Filimport (gammel)');
 
-    bank = [...seedQuestions, ...legacyOtdb, ...legacyImported, ...bank.filter(q => q.source !== 'seed' || existingIds.has(q.id))];
-    bank = dedupeByIdAndText(bank);
-    writeBank(bank);
+      bank = [...seedQuestions, ...legacyOtdb, ...legacyImported, ...bank.filter(q => q.source !== 'seed' || existingIds.has(q.id))];
+      bank = dedupeByIdAndText(bank);
+      writeBank(bank);
+      // Migreringen markeres ALDRI som fullført før alle data er verifisert
+      // faktisk lagret i localStorage (P0-krav).
+      verifyPersisted(bank);
 
-    // Rydd opp gamle nøkler (bevarer dem ikke lenger – banken er nå kilden)
-    localStorage.removeItem(LEGACY_KEYS.otdbCache);
-    localStorage.removeItem(LEGACY_KEYS.imported);
+      // Rydd opp gamle nøkler (bevarer dem ikke lenger – banken er nå kilden
+      // og lagringen er verifisert)
+      localStorage.removeItem(LEGACY_KEYS.otdbCache);
+      localStorage.removeItem(LEGACY_KEYS.imported);
 
-    // Behold brukte-IDer som fortsatt matcher banken (f.eks. q1–q50);
-    // ustabile gamle otdb-IDer kan uansett ikke matches og fjernes.
-    cleanupUsedIds(bank);
+      // Behold brukte-IDer som fortsatt matcher banken (f.eks. q1–q50);
+      // ustabile gamle otdb-IDer kan uansett ikke matches og fjernes.
+      cleanupUsedIds(bank);
 
-    localStorage.setItem(MIGRATED_KEY, 'done');
+      localStorage.setItem(MIGRATED_KEY, 'done');
+    } catch (error) {
+      // Migreringen kan ikke fullføres (typisk full lagringskvote).
+      // Kravsikkerhet (P0): ALDRI krasj ved oppstart og ALDRI slett data –
+      // eksisterende bank er uendret, og migreringen prøves igjen neste
+      // oppstart. Brukeren kan fortsatt lese og eksportere banken.
+      console.warn(
+        'Migrering av spørsmålsbanken er utsatt – eksisterende data er uendret:',
+        (error as Error).message
+      );
+    }
   }
 }
 

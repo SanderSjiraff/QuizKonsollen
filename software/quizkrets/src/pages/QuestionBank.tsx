@@ -11,6 +11,7 @@ import {
   updateQuestion,
   deleteQuestion,
   findDuplicateByText,
+  StorageError,
   type StoredQuestion,
 } from '../data/questionStore';
 import {
@@ -386,23 +387,33 @@ export default function QuestionBank({ onBack }: QuestionBankProps) {
   };
 
   const handleSave = (question: Question) => {
-    if (editing === 'new') {
-      const result = addQuestions([question], 'manual', 'Manuell');
+    try {
+      if (editing === 'new') {
+        const result = addQuestions([question], 'manual', 'Manuell');
+        showFeedback(
+          result.added > 0,
+          result.added > 0 ? 'Spørsmålet ble lagt til!' : 'Spørsmålet finnes allerede.'
+        );
+      } else if (editing) {
+        updateQuestion(editing.id, {
+          text: question.text,
+          type: question.type,
+          difficulty: question.difficulty,
+          categories: question.categories,
+          choices: question.choices,
+          correctChoiceIds: question.correctChoiceIds,
+          explanation: question.explanation,
+        });
+        showFeedback(true, 'Endringene er lagret!');
+      }
+    } catch (error) {
+      // Lagringsfeil (f.eks. full kvote): data er uendret – vis meldingen og
+      // behold dialogen åpen så brukerens innhold ikke går tapt.
       showFeedback(
-        result.added > 0,
-        result.added > 0 ? 'Spørsmålet ble lagt til!' : 'Spørsmålet finnes allerede.'
+        false,
+        error instanceof StorageError ? error.message : 'Uventet feil ved lagring.'
       );
-    } else if (editing) {
-      updateQuestion(editing.id, {
-        text: question.text,
-        type: question.type,
-        difficulty: question.difficulty,
-        categories: question.categories,
-        choices: question.choices,
-        correctChoiceIds: question.correctChoiceIds,
-        explanation: question.explanation,
-      });
-      showFeedback(true, 'Endringene er lagret!');
+      return;
     }
     setEditing(null);
     setVersion(v => v + 1);
@@ -410,8 +421,15 @@ export default function QuestionBank({ onBack }: QuestionBankProps) {
 
   const handleDelete = () => {
     if (!deleteTarget) return;
-    const ok = deleteQuestion(deleteTarget.id);
-    showFeedback(ok, ok ? 'Spørsmålet er slettet.' : 'Kunne ikke slette spørsmålet.');
+    try {
+      const ok = deleteQuestion(deleteTarget.id);
+      showFeedback(ok, ok ? 'Spørsmålet er slettet.' : 'Kunne ikke slette spørsmålet.');
+    } catch (error) {
+      showFeedback(
+        false,
+        error instanceof StorageError ? error.message : 'Uventet feil ved sletting.'
+      );
+    }
     setDeleteTarget(null);
     setVersion(v => v + 1);
   };

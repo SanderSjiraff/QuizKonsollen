@@ -5,9 +5,8 @@ import {
   Download, Trash2,
 } from 'lucide-react';
 import type { Question } from '../types';
-import { addQuestions } from '../data/questionStore';
+import { addQuestions, normalizeText, StorageError } from '../data/questionStore';
 import { validateQuestionDraft, type ValidationIssue } from '../core/questionValidation';
-import { normalizeText } from '../data/questionStore';
 
 interface ImportQuestionsProps {
   onBack: () => void;
@@ -257,22 +256,31 @@ export default function ImportQuestions({ onBack, onImportComplete }: ImportQues
 
   const handleImport = () => {
     if (valid.length === 0) return;
-    // Duplikater mot eksisterende bank avvises av addQuestions
-    const result = addQuestions(
-      valid.map(v => v.preview),
-      'import',
-      fileName ?? 'Filimport'
-    );
-    setImported(result.added);
-    setValid([]);
-    setInvalid([]);
-    setDuplicates([]);
-    if (result.duplicates > 0) {
-      setDuplicates(
-        result.rejectedQuestions.map(q => q.text)
+    try {
+      // Duplikater mot eksisterende bank avvises av addQuestions
+      const result = addQuestions(
+        valid.map(v => v.preview),
+        'import',
+        fileName ?? 'Filimport'
+      );
+      setImported(result.added);
+      setValid([]);
+      setInvalid([]);
+      setDuplicates([]);
+      if (result.duplicates > 0) {
+        setDuplicates(
+          result.rejectedQuestions.map(q => q.text)
+        );
+      }
+      onImportComplete();
+    } catch (error) {
+      // Lagringsfeil: banken er uendret. Vis meldingen med eksport-hint.
+      setError(
+        error instanceof StorageError
+          ? error.message
+          : 'Uventet feil ved import. Eksisterende spørsmål er uendret.'
       );
     }
-    onImportComplete();
   };
 
   return (
