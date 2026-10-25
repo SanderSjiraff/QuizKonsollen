@@ -277,6 +277,69 @@ test.describe('Kategorivekting i lagrede quizer (P1 #5)', () => {
   });
 });
 
+test.describe('Nullstilling ved tilbake til lobby (P1 #6)', () => {
+  test('resultatskjerm → lobby → nytt spill starter fra første spørsmål med fersk sesjon', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    // Runde 1: spill ferdig
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+
+    // Tilbake til lobby og start på nytt
+    await page.getByRole('button', { name: 'Tilbake til lobby' }).click();
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    // Ny sesjon: runde 2 starter på spørsmål 1 – ikke på det siste
+    // spørsmålet fra runde 1 med gammel sesjon (der svar er blokkert av
+    // duplikatbeskyttelsen i den avsluttede GameSession).
+    await expect(page.getByText('Spørsmål 1 av 5')).toBeVisible();
+
+    // Hele runde 2 kan spilles ferdig og gir normale resultater
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+  });
+});
+
+test.describe('Lagmodus fra alle startpunkter (P1 #7)', () => {
+  test('team-modus startet fra GameSetup viser lagresultater på resultatskjermen', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+
+    // Velg Lag-modus og 2 spillere
+    await page.getByRole('button', { name: 'Lag', exact: true }).click();
+    await page.getByLabel('Flere spillere').click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    // Hot-seat med 2 spillere: begge svarer på hvert spørsmål
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+
+    // Resultatskjermen må vise lagresultater – uten korrekt lagbygging
+    // var config.teams tom og lagdelen ble aldri rendret.
+    await expect(page.getByText('Lag 1')).toBeVisible();
+    await expect(page.getByText('Lag 2')).toBeVisible();
+  });
+});
+
 test.describe('Buzzer-modus', () => {
   test('spiller buzzer med tast, svarer, og de andre får ubesvart', async ({ page }) => {
     await page.goto('/');

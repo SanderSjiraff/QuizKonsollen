@@ -31,6 +31,7 @@ import {
   selectDistributed,
   countAvailable,
 } from '../core/questionSelector';
+import { buildTeams } from '../core/teams';
 
 const USED_QUESTIONS_KEY = 'quizkrets_used_question_ids';
 
@@ -179,9 +180,17 @@ export function useGameEngine() {
       const effectiveConfig = options?.configUpdates
         ? { ...config, ...options.configUpdates }
         : config;
-      if (options?.configUpdates) {
-        setConfig(effectiveConfig);
-      }
+
+      // P1 #7: Sikre at lagstrukturen alltid stemmer uansett startpunkt
+      // (quizbygger, lagret quiz, tilfeldig quiz). Ved lag-modus bygges
+      // lagene alltid på nytt fra gjeldende spillere – dette respekterer
+      // ev. teamId satt i quizbyggeren og fanger opp spillerendringer i
+      // GameSetup. Ved andre moduser er teams alltid tom.
+      const configWithTeams: GameConfig = {
+        ...effectiveConfig,
+        teams: effectiveConfig.gameMode === 'team' ? buildTeams(effectiveConfig.players) : [],
+      };
+      setConfig(configWithTeams);
 
       let selected: Question[];
       if (options?.questions && options.questions.length > 0) {
@@ -404,6 +413,20 @@ export function useGameEngine() {
     []
   );
 
+  /** Tilbake til lobby fra resultatskjermen (P1 #6).
+   *
+   * MÅ aldri gjenbruke den avsluttede GameSession: gamle svar blokkerer
+   * nye registreringer (duplikatbeskyttelse), og spørsmålsindeksen står
+   * fortsatt på siste spørsmål. Opprett derfor alltid ny sesjon og
+   * nullstill indeksen – samme spørsmål kan da spilles på nytt fra lobbyen.
+   */
+  const backToLobby = useCallback(() => {
+    sessionRef.current = new GameSession();
+    setAnswerVersion(v => v + 1);
+    setCurrentQuestionIndex(0);
+    setScreen('lobby');
+  }, []);
+
   return {
     screen,
     config,
@@ -433,6 +456,6 @@ export function useGameEngine() {
     nextQuestion,
     resetGame,
     playAgain,
-    backToLobby: () => setScreen('lobby'),
+    backToLobby,
   };
 }

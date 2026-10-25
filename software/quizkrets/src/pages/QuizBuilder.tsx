@@ -13,7 +13,7 @@ import {
 } from '../core/categories';
 import { PLAYER_COLORS } from '../data/mockData';
 import SelectionErrorDialog from '../components/SelectionErrorDialog';
-import type { Difficulty, GameMode, Player, Team } from '../types';
+import type { Difficulty, GameMode, Player } from '../types';
 
 interface QuizBuilderProps {
   config: GameConfig;
@@ -54,16 +54,8 @@ function buildPlayers(count: number, existing: Player[]): Player[] {
   });
 }
 
-/** Bygg to lag fra spillernes teamId. */
-function buildTeams(players: Player[]): Team[] {
-  return [1, 2].map(teamId => ({
-    id: teamId,
-    name: `Lag ${teamId}`,
-    color: teamId === 1 ? '#3B82F6' : '#F59E0B',
-    score: 0,
-    playerIds: players.filter(p => (p.teamId ?? (p.id % 2 === 1 ? 1 : 2)) === teamId).map(p => p.id),
-  }));
-}
+/** Bygg to lag fra spillernes teamId – felles logikk i core/teams (P1 #7). */
+import { buildTeams } from '../core/teams';
 
 export default function QuizBuilder({
   config,
