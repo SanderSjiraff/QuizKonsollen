@@ -16,6 +16,7 @@ import { triviaApiProvider } from '../data/adapters/triviaApiAdapter';
 import { addQuestions, getAllQuestions } from '../data/questionStore';
 import { countAvailable } from '../core/questionSelector';
 import { expandSelection } from '../core/categories';
+import { matchTheme } from '../core/themeMatcher';
 
 export interface FetchProgress {
   status: 'idle' | 'checking' | 'fetching' | 'complete' | 'error' | 'insufficient';
@@ -78,8 +79,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Sjekk om spørsmål matcher kriteriene. */
+/** Sjekk om spørsmål matcher kriteriene.
+ *  For tag-baserte temaer (ingen interne kategorier): stoler vi på at API-et
+ *  allerede filtrerte via tags, så alle hentede spørsmål beholdes.
+ */
 function matchesCriteria(q: Question, criteria: FetchCriteria): boolean {
+  if (criteria.customTheme) {
+    const resolved = matchTheme(criteria.customTheme);
+    if (resolved.internalCategories.length === 0) {
+      // Tag-basert: API-filtering via tags, ikke lokalt.
+      return true;
+    }
+    const expandedCategories = expandSelection(resolved.internalCategories);
+    const difficulties = new Set(criteria.difficulties);
+    const matchesCategory =
+      expandedCategories.size === 0 || q.categories.some(c => expandedCategories.has(c));
+    const matchesDifficulty =
+      criteria.difficulties.length === 0 || difficulties.has(q.difficulty);
+    return matchesCategory && matchesDifficulty;
+  }
+
   const expanded = expandSelection(criteria.categories);
   const difficulties = new Set(criteria.difficulties);
 
@@ -105,6 +124,21 @@ export class AutoQuestionFetcher {
   /** Beregn hvor mange spørsmål som mangler for å oppfylle kriteriene. */
   calculateMissing(criteria: FetchCriteria): number {
     const all = getAllQuestions();
+
+    if (criteria.customTheme) {
+      const resolved = matchTheme(criteria.customTheme);
+      // Ingen intern mapping → temaet er kjent bare via tags; alle må hentes.
+      if (resolved.internalCategories.length === 0) return criteria.count;
+      const available = countAvailable(all, {
+        categories: resolved.internalCategories,
+        difficulties: criteria.difficulties,
+        count: criteria.count,
+        excludeIds: criteria.excludeIds,
+        allowReuse: false,
+      });
+      return Math.max(0, criteria.count - available.fresh);
+    }
+
     const available = countAvailable(all, {
       categories: criteria.categories,
       difficulties: criteria.difficulties,
@@ -344,13 +378,22 @@ export class AutoQuestionFetcher {
 
   private _selectLocalQuestions(criteria: FetchCriteria): Question[] {
     const all = getAllQuestions();
-    const expanded = expandSelection(criteria.categories);
+
+    // For customTheme: bruk temaets interne kategorier (eller tom = alle hvis tag-basert)
+    let categoriesForLookup: string[] = criteria.categories;
+    if (criteria.customTheme) {
+      const resolved = matchTheme(criteria.customTheme);
+      categoriesForLookup =
+        resolved.internalCategories.length > 0 ? resolved.internalCategories : [];
+    }
+
+    const expanded = expandSelection(categoriesForLookup);
     const difficulties = new Set(criteria.difficulties);
     const excluded = new Set(criteria.excludeIds ?? []);
 
     let pool = all.filter(q => {
       const matchesCategory =
-        criteria.categories.length === 0 || q.categories.some(c => expanded.has(c));
+        categoriesForLookup.length === 0 || q.categories.some(c => expanded.has(c));
       const matchesDifficulty =
         criteria.difficulties.length === 0 || difficulties.has(q.difficulty);
       return matchesCategory && matchesDifficulty && !excluded.has(q.id);
@@ -371,17 +414,25 @@ export class AutoQuestionFetcher {
     amount: number
   ): import('../data/adapters/types').ProviderFetchParams {
     let providerCategory: string | undefined;
-    if (criteria.categories.length > 0 && provider.categories.length > 0) {
-      const expanded = expandSelection(criteria.categories);
+
+    // Når customTheme er satt: prøv å resolve temaet til interne kategorier,
+    // og gi den til passende provider.
+    const resolvedTheme = criteria.customTheme ? matchTheme(criteria.customTheme) : null;
+
+    if (resolvedTheme?.internalCategories.length && provider.categories.length > 0) {
+      const expanded = expandSelection(resolvedTheme.internalCategories);
       const match = provider.categories.find(c => expanded.has(c.internalCategoryId));
       if (match) {
         providerCategory = match.providerId;
       }
     }
 
+    // For Trivia API: bruk temaets externalTags (API-spesifikke tags), ikke
+    // rå brukerstreng. Dette gir korrekte tag-oppslag som "dinosaurs" for
+    // Dinosaurer.
     const tags: string[] | undefined =
-      provider.id === 'trivia-api' && criteria.customTheme
-        ? [criteria.customTheme]
+      provider.id === 'trivia-api' && resolvedTheme?.externalTags.length
+        ? resolvedTheme.externalTags
         : undefined;
 
     return {

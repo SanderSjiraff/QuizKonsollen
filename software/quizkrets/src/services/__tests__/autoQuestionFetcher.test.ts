@@ -55,8 +55,8 @@ function seedBank(questions: Question[]) {
       sourceRef: 'Test',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-    })))
-  );
+    }))
+  ));
 }
 
 function createMockProvider(id: string): {
@@ -72,7 +72,11 @@ function createMockProvider(id: string): {
     licenseNote: id,
     description: 'Mock',
     rateLimit: { callsPerWindow: 10, windowMs: 5000 },
-    categories: [{ providerId: 'history', name: 'Historie', internalCategoryId: 'historie' }],
+    categories: [
+      { providerId: 'history', name: 'Historie', internalCategoryId: 'historie' },
+      { providerId: 'general_knowledge', name: 'Generell kunnskap', internalCategoryId: 'generell-kunnskap' },
+      { providerId: 'sport_and_leisure', name: 'Sport og fritid', internalCategoryId: 'sport' },
+    ],
     msUntilReady: mockReady,
     fetchQuestions: mockFetch,
   };
@@ -86,7 +90,6 @@ describe('AutoQuestionFetcher', () => {
   let mockTrivia: ReturnType<typeof createMockProvider>;
 
   beforeEach(() => {
-    // Sikre online i node-miljø hvor navigator kan være undefined/false
     Object.defineProperty(navigator, 'onLine', { value: true, writable: true, configurable: true });
     mockOtdb = createMockProvider('opentdb');
     mockTrivia = createMockProvider('trivia-api');
@@ -111,6 +114,131 @@ describe('AutoQuestionFetcher', () => {
       ...overrides,
     };
   }
+
+  // ========================================================================
+  // Kritiske fikser for v1.3.2 – customTheme mapping og lokal validering
+  // ========================================================================
+
+  describe('calculateMissing / canFulfillLocally med customTheme', () => {
+    it('krever alltid fetching når customTheme er tag-basert (ingen intern mapping)', () => {
+      seedBank([
+        makeQuestion({ categories: ['generell-kunnskap'], difficulty: 'middels' }),
+        makeQuestion({ categories: ['historie'], difficulty: 'middels' }),
+      ]);
+
+      const criteria = createCriteria({ count: 5, customTheme: 'Dinosaurer' });
+      // Dinosaurer har ingen interne kategorier → ingen lokale spørsmål matcher
+      expect(fetcher.calculateMissing(criteria)).toBe(5);
+      expect(fetcher.canFulfillLocally(criteria)).toBe(false);
+    });
+
+    it('teller lokale spørsmål når customTheme matcher via subword eller migrasjon', () => {
+      seedBank([
+        makeQuestion({ categories: ['dyrearter'], difficulty: 'middels' }),
+      ]);
+
+      // 'dyr' mappes via MIGRATION_MAP -> 'dyrearter'
+      const criteria = createCriteria({ count: 1, customTheme: 'dyr' });
+      expect(fetcher.calculateMissing(criteria)).toBe(0);
+      expect(fetcher.canFulfillLocally(criteria)).toBe(true);
+    });
+
+    it('teller også lokale spørsmål ved direkte kategoritreff', () => {
+      seedBank([
+        makeQuestion({ categories: ['historie'], difficulty: 'middels' }),
+      ]);
+
+      const criteria = createCriteria({ count: 1, customTheme: 'historie' });
+      expect(fetcher.calculateMissing(criteria)).toBe(0);
+      expect(fetcher.canFulfillLocally(criteria)).toBe(true);
+    });
+
+    it('fungerer som før uten customTheme', () => {
+      seedBank([
+        makeQuestion({ categories: ['historie'], difficulty: 'middels' }),
+      ]);
+
+      const criteria = createCriteria({ count: 2 });
+      expect(fetcher.calculateMissing(criteria)).toBe(1);
+      expect(fetcher.canFulfillLocally(criteria)).toBe(false);
+    });
+  });
+
+  describe('customTheme / tags – korrekt API-mapping', () => {
+    it('mapper "Dinosaurer" til korrekt ekstern tag (ikke rå brukerstreng)', async () => {
+      seedBank([]);
+      mockOtdb.mockFetch.mockResolvedValue({ questions: [], hadInvalid: false });
+      mockTrivia.mockFetch.mockResolvedValue({ questions: [makeQuestion()], hadInvalid: false });
+
+      const criteria = createCriteria({ count: 1, customTheme: 'Dinosaurer' });
+      await fetcher.fetchMissing(criteria);
+
+      expect(mockTrivia.mockFetch).toHaveBeenCalled();
+      const callArg = mockTrivia.mockFetch.mock.calls[0][0];
+      expect(callArg.tags).toContain('dinosaurs');
+      expect(callArg.tags).not.toContain('Dinosaurer');
+    });
+
+    it('mapper "The Beatles" til tag "the_beatles"', async () => {
+      seedBank([]);
+      mockOtdb.mockFetch.mockResolvedValue({ questions: [], hadInvalid: false });
+      mockTrivia.mockFetch.mockResolvedValue({ questions: [makeQuestion()], hadInvalid: false });
+
+      const criteria = createCriteria({ count: 1, customTheme: 'The Beatles' });
+      await fetcher.fetchMissing(criteria);
+
+      const callArg = mockTrivia.mockFetch.mock.calls[0][0];
+      expect(callArg.tags).toEqual(['the_beatles']);
+    });
+
+    it('setter tags=undefined for ukjent customTheme', async () => {
+      seedBank([]);
+      mockOtdb.mockFetch.mockResolvedValue({ questions: [makeQuestion()], hadInvalid: false });
+
+      const criteria = createCriteria({ count: 1, customTheme: 'xyz-finnes-ikke' });
+      await fetcher.fetchMissing(criteria);
+
+      const callArg = mockOtdb.mockFetch.mock.calls[0][0];
+      expect(callArg.tags).toBeUndefined();
+    });
+
+    it('mapper kategorien direkte når customTheme har intern treff (ingen tags)', async () => {
+      seedBank([]);
+      mockOtdb.mockFetch.mockResolvedValue({ questions: [makeQuestion()], hadInvalid: false });
+
+      const criteria = createCriteria({ count: 1, customTheme: 'historie' });
+      await fetcher.fetchMissing(criteria);
+
+      // Når temaet mapper til en intern kategori, hentes via kategori-mapping
+      // (ikke via tags). OpenTDB bør bli kallet med providerCategory='history'.
+      expect(mockOtdb.mockFetch).toHaveBeenCalled();
+      const callArg = mockOtdb.mockFetch.mock.calls[0][0];
+      expect(callArg.providerCategory).toBe('history');
+      expect(callArg.tags).toBeUndefined();
+      expect(mockTrivia.mockFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('fetchMissing – filtrering av hentede spørsmål', () => {
+    it('beholder spørsmål hentet via customTheme (filtrert av API selv)', async () => {
+      seedBank([]);
+      // API returnerer et spørsmål i kategori 'dyrearter' (fra tag-mapping)
+      const fetched = makeQuestion({ categories: ['dyrearter'], difficulty: 'middels' });
+      mockOtdb.mockFetch.mockResolvedValue({ questions: [], hadInvalid: false });
+      mockTrivia.mockFetch.mockResolvedValue({ questions: [fetched], hadInvalid: false });
+
+      const criteria = createCriteria({ count: 1, customTheme: 'Dinosaurer' });
+      const result = await fetcher.fetchMissing(criteria);
+
+      expect(result.success).toBe(true);
+      expect(result.fetchedCount).toBeGreaterThan(0);
+      expect(result.questions.some(q => q.categories.includes('dyrearter'))).toBe(true);
+    });
+  });
+
+  // ========================================================================
+  // Eksisterende tester (verifiserer at ikke-regresjonen holder)
+  // ========================================================================
 
   describe('calculateMissing / canFulfillLocally', () => {
     it('returnerer 0 når localStorage har nok spørsmål', () => {
@@ -320,18 +448,5 @@ describe('AutoQuestionFetcher', () => {
     });
   });
 
-  describe('customTheme / tags', () => {
-    it('sender tags til Trivia API når customTheme er satt', async () => {
-      seedBank([]);
-      mockOtdb.mockFetch.mockResolvedValue({ questions: [], hadInvalid: false });
-      mockTrivia.mockFetch.mockResolvedValue({ questions: [makeQuestion()], hadInvalid: false });
-
-      const criteria = createCriteria({ count: 1, customTheme: 'vikings' });
-      await fetcher.fetchMissing(criteria);
-
-      expect(mockTrivia.mockFetch).toHaveBeenCalled();
-      const callArg = mockTrivia.mockFetch.mock.calls[0][0];
-      expect(callArg.tags).toEqual(['vikings']);
-    });
-  });
+  // Tidligere test erstattet av den nye suite over (customTheme / tags)
 });
