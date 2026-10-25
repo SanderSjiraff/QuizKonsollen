@@ -2,6 +2,36 @@
 
 ## Siste endringer
 
+### v1.3.2 – customTheme mapping A-Å (viktig fiks)
+
+1. **calculateMissing med customTheme**
+   - `matchTheme()` –resolved interne kategorier (0 ved tag-basert tema)
+   - **Kritisk fix**: Ikke lenger teller alle lokale spørsmål (f.eks. generell-kunnskap) som matcher når det er et egendefinert tema uten intern kategori-mapping (f.eks. «Dinosaurer»)
+   - Fetch trigges korrekt når tag-tilknytting, men ingen interne spørsmål finnes
+
+2. **_buildProviderParams via matchTheme**
+   - Sender `externalTags` fra `matchTheme()` til Trivia API (ikke rå brukerstreng)
+   - «Dinosaurer» → `dinosaurs`, «The Beatles» → `the_beatles`
+   - «historie» → intern kategori (providerCategory), ingen tags
+   - Ukjent tema → tags=undefined (ingen API-kall forsøkt for tema-basert henting)
+
+3. **matchesCriteria for tag-baserte temaer**
+   - Stoler på API-filtrering via tags (returnerer true for alle hentede)
+   - For interne kategorier: filtrerer som før lokalt
+
+4. **_selectLocalQuestions med customTheme**
+   - Bruker temaets interne kategorier, ikke manuell kategori-valg
+   - Riktig spørsmålsuttrekk når «Dinosaurer»-spørsmål har category `dyrearter`
+
+5. **TDD-verifisering**
+   - 7 nye enhetstester for customTheme-scenarier (alle grønne)
+   - Ingen regressjon i 167[^1] eksisterende tester
+   - Build OK
+
+[^1]: Total 174 tester (23 i AutoQuestionFetcher inkl. 7 nye customTheme-tester).
+
+---
+
 ### v1.3 – AutoFetchService + customTheme
 
 1. **AutoFetchService integrert i QuizBuilder**
@@ -127,7 +157,10 @@ Alle endringer nedenfor er verifisert med TDD (RED→GRØNN) og full test-suite.
 
 ```bash
 # Enhetstester (Vitest)
-npm run test                    # 166 tester, alle grønne
+npm run test                    # 174 tester, alle grønne
+
+# Integrasjonstest mot faktiske API-er (valgfri, krever nett)
+npx vitest run src/services/__tests__/integration/apiLive.test.ts
 
 # E2E-tester (Playwright)
 npx playwright test tests/quizkrets.spec.ts   # 25 tester, alle grønne
