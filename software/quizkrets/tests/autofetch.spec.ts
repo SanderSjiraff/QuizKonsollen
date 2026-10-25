@@ -133,10 +133,10 @@ test.describe('AutoFetch + customTheme', () => {
       updatedAt: new Date().toISOString(),
     }));
 
-    await page.addInitScript((b) => {
+    await page.addInitScript((bankStr: string) => {
       localStorage.setItem('quizkrets_question_bank_migrated_v1', 'done');
-      localStorage.setItem('quizkrets_question_bank_v1', JSON.stringify(b));
-    });
+      localStorage.setItem('quizkrets_question_bank_v1', bankStr);
+    }, JSON.stringify(bank));
 
     // Simuler offline ved å blokker kun API-kallene – IKKE Vite-serveren
     await page.route('https://opentdb.com/api.php?*', (route) => route.abort('internetdisconnected'));
