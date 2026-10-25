@@ -56,7 +56,11 @@
 
 ## Neste: P2 #11–13
 
-- Kategori-etikett viser matchende kategori
-- Tilgjengelighet på ikon-knapper (f.eks. SavedQuizzes «Tilbake»)
-- Testing/dokumentasjon: oppdater AGENTS.md etter bekreftede endringer
+- Kategori-etikett viser matchende kategori ✅ (commit 2ccfc53)
+- Tilgjengelighet på ikon-knapper (SavedQuizzes/Lobby/QuestionSources/Scoreboard «Tilbake», Lobby «Bytt farge») ✅ (commit 2ccfc53)
+- Testing/dokumentasjon: oppdater AGENTS.md etter bekreftede endringer ✅
 - Uavhengig kodegjennomgang og endelig leveranserapport
+
+## Verifikasjon P2 (total)
+
+- Enhetstester: 130/130 · E2E: 24/24 · TypeScript-bygg: OK
