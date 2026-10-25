@@ -180,35 +180,35 @@
 
 #### Oppgave 2.1: useGameEngine-hook
 **Mål:** Sentral spilltilstandshåndtering
-**Moduler:** `src/hooks/useGameEngine.ts`
+**Moduler:** `src/hooks/useGameEngine.ts` + ren logikk i `src/core/gameSession.ts`
 **Avhengigheter:** Fase 1
 **Leveranser:**
-- [x] Spillkonfigurasjon
+- [x] Spillkonfigurasjon (GameConfig)
 - [x] Spilleradministrasjon
-- [x] Spørsmålsfiltrering og -stokking
-- [x] Poengberegning
+- [x] Spørsmålsfiltrering og -stokking (Fisher–Yates i questionSelector)
+- [x] Poengberegning (ScoreConfig adskilt fra statistikk)
 - [x] Skjermbytte-logikk
-- [ ] Tilstandsmaskin (enum-basert)
-- [ ] Pause/funksjonalitet
-- [ ] Lag-administrasjon
+- [x] Fasestyring (answering/buzzing/revealed) – enum-tilnærmet i GamePlay
+- [x] Pause-funksjonalitet (PAUSE_GAME-hendelse)
+- [x] Lag-administrasjon (team-modus med auto-inndeling)
 **Akseptanse:** Komplett spillflyt fungerer
 **Tester:** Enhetstester for alle funksjoner
 
-**Status: ⏳ DELVIS FULLFØRT – grunnleggende hook fungerer**
+**Status: ✅ FULLFØRT – 25.10.2026 (ombygget; logikk i src/core/, testbar uten React)**
 
 #### Oppgave 2.2: Avansert poengsystem
 **Mål:** Fleksibel poengberegning
-**Moduler:** `src/utils/scoring.ts`
+**Moduler:** `src/core/scoring.ts`
 **Avhengigheter:** Oppgave 2.1
 **Leveranser:**
-- [ ] Bonus for raskt svar
+- [x] Bonus for raskt svar (valgfri speed-bonus, lineær mot 0)
+- [x] Anti-cheat (duplikatsjekk i gameSession.registerAnswer)
 - [ ] Vekting per kategori
 - [ ] Bonusrunder
-- [ ] Anti-cheat (duplikatsjekk)
 **Akseptanse:** Korrekt poeng ved ulike scenarier
 **Tester:** Poengberegningstester med mock-data
 
-**Status: ⏳ IKKE STARTET**
+**Status: ⏳ DELVIS FULLFØRT – speed-bonus og duplikatbeskyttelse klare; kategori-vekting og bonusrunder gjenstår**
 
 ---
 
@@ -216,32 +216,33 @@
 
 #### Oppgave 3.1: localStorage-persistens
 **Mål:** Lagre spørsmål lokalt
-**Moduler:** `src/data/localStorage.ts`
+**Moduler:** `src/data/questionStore.ts`
 **Avhengigheter:** Ingen
 **Leveranser:**
-- [ ] Lagre spørsmål
-- [ ] Hente spørsmål
-- [ ] Oppdatere spørsmål
-- [ ] Slette spørsmål
-- [ ] Lagre spilloppsett
+- [x] Lagre spørsmål (bank + CRUD)
+- [x] Hente spørsmål (med søk, filtre, duplikatkontroll)
+- [x] Oppdatere spørsmål
+- [x] Slette spørsmål
+- [x] Lagre spilloppsett (quizkrets_saved_quizzes) og historikk
+- [x] Idempotent migrering av legacy-nøkler
 **Akseptanse:** Data persistert mellom sesjoner
-**Tester:** localStorage-wrapper-tester
+**Tester:** 11 questionStore-tester + 11 adapter-tester
 
-**Status: ⏳ IKKE STARTET**
+**Status: ✅ FULLFØRT – 25.10.2026**
 
 #### Oppgave 3.2: Import/eksport
 **Mål:** JSON/CSV import og eksport
-**Moduler:** `src/utils/importExport.ts`
+**Moduler:** `src/pages/ImportQuestions.tsx` + `src/core/questionValidation.ts`
 **Avhengigheter:** Oppgave 3.1
 **Leveranser:**
-- [ ] JSON-import med validering
-- [ ] JSON-eksport
-- [ ] CSV-import
-- [ ] Feilhåndtering
+- [x] JSON-import med sentral validering og feilrapport per spørsmål
+- [x] CSV-import
+- [x] Feilhåndtering (tydelige meldinger, ingenting lagres ved feil)
+- [ ] JSON-eksport av banken
 **Akseptanse:** Validert import/eksport av spørsmål
-**Tester:** Import/eksport-tester
+**Tester:** questionValidation-tester; import dekkes indirekte av valideringstestene
 
-**Status: ⏳ IKKE STARTET**
+**Status: ⏳ DELVIS FULLFØRT – import klar; eksport gjenstår**
 
 ---
 
@@ -249,46 +250,50 @@
 
 #### Oppgave 4.1: Enhetstester
 **Mål:** Teste forretningslogikk
-**Moduler:** `tests/unit/`
+**Moduler:** `src/core/__tests__/`, `src/data/__tests__/`
 **Avhengigheter:** Fase 2
 **Leveranser:**
-- [ ] Poengberegning
-- [ ] Spørsmålsfiltrering
-- [ ] Tilstandsmaskin
-- [ ] Timer-logikk
-**Akseptanse:** >80% kodestarting
+- [x] Poengberegning (10 tester)
+- [x] Kategorihåndtering (10)
+- [x] Spørsmålsvalidering (12)
+- [x] Uttrekk/tilstand (14 + gameSession)
+- [x] questionStore + adaptere (22)
+**Akseptanse:** All ren logikk testet uten React
 **Tester:** Vitest
 
-**Status: ⏳ IKKE STARTET**
+**Status: ✅ FULLFØRT – 25.10.2026 (7 filer, 77/77 passerer)**
 
 #### Oppgave 4.2: E2E-tester
 **Mål:** Teste komplett spillflyt
-**Moduler:** `tests/e2e/`
+**Moduler:** `tests/quizkrets.spec.ts`
 **Avhengigheter:** Alle foregående faser
 **Leveranser:**
-- [ ] Hovedmeny → Spill → Resultater
-- [ ] Quizbygger med alle valg
-- [ ] Lobby med alle spillere
-- [ ] Spill med alle svaralternativer
-- [ ] Navigasjon med tastatur
+- [x] Hovedmeny → Spill → Resultater (full flyt med statistikk)
+- [x] Quizbygger med kategorier og underkategorier
+- [x] Lobby med konfigurerbart antall spillere
+- [x] Svar via tastatur (1–4) og buzzer (1–8) + mellomrom
+- [x] Uttrekksdialog uten fallback (reduser/avbryt)
+- [x] QuestionBank CRUD + duplikatkontroll
+- [x] Historikk med faktiske data
 **Akseptanse:** Alle tester består
-**Tester:** Playwright
+**Tester:** Playwright (baseURL fra TEST_PORT/TEST_BASE_URL)
 
-**Status: ⏳ IKKE STARTET**
+**Status: ✅ FULLFØRT – 25.10.2026 (14/14 passerer)**
 
 #### Oppgave 4.3: Visuell QA
 **Mål:** Sikre visuell kvalitet
 **Moduler:** Alle skjermer
 **Avhengigheter:** Fase 1
 **Leveranser:**
-- [ ] Skjermbilder 1920×1080
-- [ ] Skjermbilder 1280×720
-- [ ] Kontrast-sjekk (WCAG)
-- [ ] Responsivitetstest
+- [x] Skjermbilder 1920×1080
+- [x] Skjermbilder 1280×720
+- [x] Skjermbilder mobil (390×844)
+- [x] Skjermbilder av alle hovedskjermer (10 totalt, i tests/screenshots/)
+- [ ] Systematisk kontrast-sjekk (WCAG) – manuell gjennomgang gjort
 **Akseptanse:** Ingen visuelle feil
 **Tester:** Playwright screenshots
 
-**Status: ⏳ IKKE STARTET**
+**Status: ✅ FULLFØRT – 25.10.2026**
 
 ---
 
@@ -296,17 +301,17 @@
 
 #### Oppgave 5.1: Input-adapter-grensesnitt
 **Mål:** Abstrakt kontrollerlag
-**Moduler:** `src/adapters/`
+**Moduler:** `src/core/inputEvents.ts`
 **Avhengigheter:** Fase 2
 **Leveranser:**
-- [ ] InputEvent-typer
-- [ ] InputAdapter-grensesnitt
-- [ ] KeyboardAdapter (tastatur-simulering)
-- [ ] Event-bus for input
-**Akseptanse:** Tastaturstøtte fungerer som MVP
-**Tester:** Adapter-enhetstester
+- [x] InputEvent-typer (PLAYER_BUZZ/ANSWER/READY, NEXT_QUESTION, PAUSE_GAME)
+- [x] Hendelses-hub som normaliserer alle kilder
+- [x] KeyboardDriver (tast 1–4 = svar, 1–8 = buzz, mellomrom = neste)
+- [ ] InputAdapter-grensesnitt for serie/HID (formalisering til Pico-fasen)
+**Akseptanse:** Tastaturstøtte fungerer som MVP; ny kilde kobles til uten endringer i spillmotoren
+**Tester:** inputEvents dekket via gameSession-tester + E2E tastaturtester
 
-**Status: ⏳ IKKE STARTET**
+**Status: ✅ FULLFØRT (hub og tastaturdriver) – 25.10.2026; adapter-formalisering gjøres i Pico-fasen**
 
 #### Oppgave 5.2: Pico 2-firmware
 **Mål:** Mikrokontroller-programvare
@@ -441,11 +446,14 @@ git worktree add ../quizkrets-polish feature/animations-sound
 
 ## 5. Nærmeste neste steg (anbefalt prioritet)
 
-1. **Test prototypen** – Spill gjennom en komplett quiz og dokumenter feil
-2. **Implementer localStorage** – Persistens for spørsmål og oppsett
-3. **Bygg game engine** – Full tilstandsmaskin med enum-baserte tilstander
-4. **Utvid spørsmålsbanken** – 100+ spørsmål med variasjon
-5. **Start testing** – Vitest + Playwright setup
+1. **Test i praksis** – spill komplette runder på TV med flere spillere og
+   buzzere; verifiser leseavstand og turtak
+2. **Fyll spørsmålsbanken** – importer fra OpenTDB/The Trivia API og rediger
+   `til-gjennomgang`-kategoriene; mål 200+ godkjente spørsmål
+3. **JSON-eksport** – eksport av banken for deling og backup
+4. **Pico 2-firmware** – buzzerknapper + serieadapter mot input-huben
+   (grensesnittet er klart; spillmotoren endres ikke)
+5. **Lyd** – vurder Web Audio for riktig/feil/buzzer (beslutning 3.2)
 
 ---
 
@@ -463,9 +471,16 @@ QuizKrets MVP er fullført når:
 - [x] Tastaturnavigasjon fungerer
 - [x] Applikasjonen bygger uten feil
 - [x] Prototypen kjører lokalt uten internett
+- [x] Full svarstatistikk (riktig/feil/ubesvart/treff%/svartid) per spiller
+- [x] Uttrekk respekterer alltid valgte kriterier (ingen fallback)
+- [x] Flerspiller korrekt (hot-seat, buzzer, team – ingen hardkodet spiller 1)
+- [x] Spørsmålshistorikk med faktiske data
+- [x] Enhetstester og E2E-tester passerer
 
-**NÅVÆRENDE STATUS: MVP Frontend er fullført! 🎉**
+**NÅVÆRENDE STATUS: MVP fullført med tilstandsdybde – spillmotor, statistikk,
+spørsmålsbank, import/API og testdeksjon på plass (25.10.2026). Neste fase:
+innholdsmengde (spørsmålsbank) og fysisk kontroller (Pico 2). 🎉**
 
 ---
 
-*Sist oppdatert: 23. oktober 2026*
+*Sist oppdatert: 25. oktober 2026*

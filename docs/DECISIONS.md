@@ -1,6 +1,8 @@
 # QuizKrets – Arkitektur- og designbeslutninger
 
-## 1. Beslutninger tatt
+*Oppdatert: 25. oktober 2026*
+
+## 1. Beslutninger tatt (planleggingsfasen, 23. oktober 2026)
 
 ### 1.1 Designretning: "TV Show" (Retning C)
 
@@ -58,19 +60,19 @@
 
 **Dato:** 23. oktober 2026
 
-**Beskrivelse:** MVP-en kjører kun med frontend og mock-data.
+**Beskrivelse:** MVP-en kjører kun med frontend. Spillmotor og data ligger i
+nettleseren; lagring skjer per i dag i localStorage (beslutning 2.2).
 
 **Begrunnelse:**
 1. **Simplicity:** Færre komponenter å sette opp og vedlikeholde
-2. **Offline-first:** Ingen nettverksavhengighet
+2. **Offline-first:** Kjernen fungerer uten nettverk (API-henting er valgfritt tillegg)
 3. **Rask prototyping:** Komponentene bygges raskere uten API-design
 4. **Senere fleksibilitet:** Backend kan introduseres når behovet oppstår
 
 **Konsekvenser:**
-- Data (spørsmål, resultater) persistert via localStorage i senere fase
 - Ingen deling av quizer mellom enheter
 - Ingen multiplayer over nettverk
-- Større frontend-bundle (all data inkludert)
+- Større frontend-bundle (all logikk og frødata inkludert)
 
 ---
 
@@ -84,12 +86,11 @@
 3. **Fremtidig fallback:** Tastatur fungerer alltid som backup
 4. **Mapping:** Tastatur-input kan enkelt oversettes til fysiske knapper
 
-**Planlagt input-mapping:**
-- Spiller 1: Taster 1, Q, A, Z
-- Spiller 2: Taster 2, W, S, X
-- Spiller 3: Taster 3, E, D, C
-- Spiller 4: Taster 4, R, F, V
-- Spillleder: Enter, Escape, Space
+**Faktisk mapping per 25.10.2026 (KeyboardDriver):**
+- Svar: taster 1–4 (A–D)
+- Buzzer: taster 1–8 (spillernummer)
+- Neste spørsmål: mellomrom
+- Pause: P
 
 ---
 
@@ -101,76 +102,157 @@
 1. **Simplicity:** Ingen IPC eller API-kall
 2. **Ytelse:** Direkte tilstandsendringer uten serialisering
 3. **Utvikling:** Lett å debugge i React DevTools
-4. **Fremtidig flytting:** Logikken kan senere ekstraheres til backend
+4. **Fremtidig flytting:** Ren logikk ligger i `src/core/` og kan senere
+   ekstraheres til backend uten omskriving
 
 **Konsekvenser:**
-- Spilltilstanden er i minnet (mister data ved refresh)
+- Spilltilstanden er i minnet (mister pågående runde ved refresh – historikk lagres)
 - Ingen multiplayer-over-nettverk
-- Hardere å dele logikk med hardware-adapterne
 
 ---
 
-## 2. Åpne beslutninger
+## 2. Beslutninger tatt i ombyggingen (24.–25. oktober 2026)
 
-### 2.1 Backend-teknologi
+### 2.1 Streng spørsmålsuttrekk – aldri fallback
 
-**Alternativer:**
-- FastAPI (Python) - Foreslått i originaldokument, god for læring
-- Express/Next.js (Node.js) - Enklere med samme språk som frontend
-- Supabase/Firebase - Managed backend, raskere å sette opp
-- Ingen backend - Fortsette med frontend-only
+**Beslutning:** `questionSelector` returnerer `SelectionError` når valgene ikke
+kan oppfylles. UI viser dialog med konkrete valg (reduser antall, hent flere
+fra nettet, tillat gjenbruk, avbryt). Ingen stille reduksjon, ingen utvidelse
+av kriterier bak ryggen på brukeren.
 
-**Avgjørelse trenges før:** Fase 3 (nettverk/multiplayer, statistikk)
-
----
-
-### 2.2 Database-løsning
-
-**Alternativer:**
-- SQLite (lokal fil) - Enkel, ingen server
-- IndexedDB (browser) - Ingen filer, async
-- localStorage - Enklest, men begrenset størrelse (5MB)
-- PostgreSQL (med backend) - Skalerbart, krever server
-
-**Avgjørelse trenges før:** Fase 2 (persistens av spørsmål og resultater)
+**Begrunnelse:** Brukeren skal stole på at quizen faktisk handler om det som
+ble valgt. En quiz som lover "Historie + vanskelig" og leverer annet er verre
+enn en tydelig feilmelding.
 
 ---
 
-### 2.3 Fysisk kontroller-design
+### 2.2 localStorage som lagring (foreløpig)
+
+**Beslutning:** questionStore bruker localStorage.
+
+**Begrunnelse:** Banken er < 2000 spørsmål ≈ 1–2 MB, godt innenfor grensen.
+Synkront API gir enkel kode og tester. SQLite vurderes i Raspberry Pi-fasen
+(backend), IndexedDB ble valgt bort – asynkron kompleksitet uten gevinst på
+denne størrelsen. Begrunnelsen er dokumentert i questionStore.ts.
+
+---
+
+### 2.3 Hierarkiske kategorier med sentral migreringsmap
+
+**Beslutning:** Flate kebab-case-IDer med `parentId`. Filtrering via
+`expandSelection` (hovedkategori matcher underkategorier). Leverandørkategorier
+oversettes gjennom én sentral map; ukjente navn → kategorien `til-gjennomgang`
+med `needsReview`-flagg, aldri vilkårlig plassering. Ukjente *tags* hos
+The Trivia API droppes.
+
+**Begrunnelse:** Stabile IDer overlever endringer i visningsnavn; én
+migreringsmap er det eneste stedet leverandørnavn håndteres; ukjente kategorier
+skal fyres opp i lyset, ikke begraves.
+
+---
+
+### 2.4 Stabile spørsmåls-IDer med innholdshash
+
+**Beslutning:** OpenTDB-IDer = `otdb-<FNV-1a>` over normalisert tekst;
+The Trivia API = `tapi-<API-id>`; manuelle = `q-<UUID>`. Aldri kun `Date.now()`.
+Duplikatkontroll på normalisert tekst + innholdshash.
+
+**Begrunnelse:** Gjenbrukssporing (`used_question_ids`) og duplikatsjekk krever
+IDer som overlever re-henting fra samme kilde.
+
+---
+
+### 2.5 The Trivia API integrert (andre leverandør)
+
+**Beslutning:** The Trivia API v2 integreres ved siden av Open Trivia DB, bak
+samme adaptergrensesnitt (`QuestionSourceAdapter`).
+
+**Undersøkelse før integrasjon:**
+- Dokumentasjon: the-trivia-api.com (v2-endpoint)
+- Lisens: **CC BY-NC 4.0** – gratis ikke-kommersiell bruk; kildehenvisning
+  vises i UI og lagres i `sourceRef`
+- Begrensninger: maks 50 spørsmål per kall, 20 kall per 5 s, stabile IDer
+- Begrensning funnet: støtter **ikke** sant/usann – adapteren avviser med
+  norsk feilmelding i stedet for å fake støtte
+
+---
+
+### 2.6 Poeng adskilt fra statistikk
+
+**Beslutning:** `ScoreConfig` (poeng + valgfri speed-bonus, lineær mot 0) er
+atskilt fra `AnswerRecord`/`PlayerStats` (riktig/feil/ubesvart/treff%/svartid).
+
+**Begrunnelse:** Endrer man poengreglene skal ikke historisk statistikk endre
+seg. Treffprosent er et faktum, poeng er et designvalg.
+
+---
+
+### 2.7 Timestamp-basert timer med duplikatbeskyttelse
+
+**Beslutning:** Nedtelling regnes på tidsstempler (ikke kumulativt tick), og
+`timeoutFiredRef` hindrer doble timeout-hendelser. `gameSession.registerAnswer`
+nektar duplikatsvar per spiller/spørsmål.
+
+**Begrunnelse:** Bakgrunnsfaner, throttling og doble hendelser (tast +
+kontroller) ellers gir feil statistikk og hoppede spørsmål.
+
+---
+
+### 2.8 Ingen AI-generering av spørsmål
+
+**Beslutning:** Spørsmål kommer fra frøbank, manuell redigering, import og
+leverandør-API-er. AI brukes ikke til å generere faktaspørsmål.
+
+**Begrunnelse:** Faktaspørsmål fra AI kan inneholde feil uten at brukeren
+oppdager det; leverandørene har redaksjonelt hold.
+
+---
+
+### 2.9 Generisk input-hub for fremtidig elektronikk
+
+**Beslutning:** All input normaliseres til
+`PLAYER_BUZZ / PLAYER_ANSWER / PLAYER_READY / NEXT_QUESTION / PAUSE_GAME`
+i `src/core/inputEvents.ts`. Tastaturet er bare én driver. Ingen firmware i
+denne fasen – men fysiske kontrollere kobles til uten endringer i spillmotoren.
+
+---
+
+### 2.10 Playwright med miljøvariabel-styrt port
+
+**Beslutning:** `TEST_PORT`/`TEST_BASE_URL` i playwright.config, `--strictPort`
+på dev-serveren, `reuseExistingServer` lokalt. Ingen URL-er i testene.
+
+**Begrunnelse:** Dev-servere opptar ofte flere porter; stille gjenbruk av en
+tilfeldig server på forventet port gir falske testresultater.
+
+---
+
+### 2.11 Byggeartefakter spores ikke i git
+
+**Beslutning:** `dist/` ignoreres konsekvent; `dist/index.html` som ved en
+tilfeldighet var sporet fra før ignore-regelen, er tatt ut av sporingen.
+
+**Begrunnelse:** Byggeoutput skal aldri i versjonskontroll; produksjonsbygg
+genereres med `npm run build` ved behov.
+
+---
+
+## 3. Åpne beslutninger
+
+### 3.1 Fysisk kontroller-design
 
 **Alternativer:**
 - **Buzzer-knapp:** Én stor knapp per spiller. Enkelt, billig, passer "førstemann"
 - **A/B/C/D-panel:** Fire knapper per spiller. Støtter alle spørsmålstyper
 - **Hybrid:** Stor buzzer + A/B/C/D. Støtter alt, men komplekst og stort
 
-**Avgjørelsessituasjon:** Ikke avgjort ennå. Anbefalt å starte med buzzer (enklest), deretter vurdere A/B/C/D basert på brukertesting.
+**Avgjørelsessituasjon:** Ikke avgjort. Anbefalt å starte med buzzer (enklest),
+deretter vurdere A/B/C/D basert på brukertesting. Input-huben (beslutning 2.9)
+støtter begge uansett.
 
 ---
 
-### 2.4 Antall støttede spillere
-
-**Alternativer:**
-- 4 spillere (standard)
-- 6 spillere
-- 8 spillere (maksimum i MVP-UI)
-
-**Avgjørelse:** 4 spillere i MVP, men UI-en støtter 8 med farger definert.
-
----
-
-### 2.5 Spørsmålsgenerering
-
-**Alternativer:**
-- Manuelt opprettet (nåværende)
-- AI-generert (GPT/Claude API) - Krever API-nøkkel
-- Import fra Open Trivia DB - Krever internett og lisens-sjekk
-- Bruker-generert - Krever moderering
-
-**Avgjørelse trenges før:** Fase 3 (storskalig spørsmålsbank)
-
----
-
-### 2.6 Lyd og lyseffekter
+### 3.2 Lyd og lyseffekter
 
 **Alternativer:**
 - Web Audio API - Ingen eksterne filer, generer lyder
@@ -181,55 +263,68 @@
 
 ---
 
-## 3. Beslutningslogg
+### 3.3 Backend-teknologi (når behovet oppstår)
 
-| Dato | Beslutning | Hvem | Status |
-|------|-----------|------|--------|
-| 23.10.2026 | Designretning: TV Show | AI-agent (Kimi) | ✅ Bestemt |
-| 23.10.2026 | Teknologistack: React+Vite+Tailwind | AI-agent (Kimi) | ✅ Bestemt |
-| 23.10.2026 | Ingen backend i MVP | AI-agent (Kimi) | ✅ Bestemt |
-| 23.10.2026 | Tastatur-input først | AI-agent (Kimi) | ✅ Bestemt |
-| 23.10.2026 | Spillmotor i frontend | AI-agent (Kimi) | ✅ Bestemt |
-| ?? | Backend-teknologi | Ukjent | ⏳ Ikke bestemt |
-| ?? | Database-løsning | Ukjent | ⏳ Ikke bestemt |
-| ?? | Kontroller-design | Ukjent | ⏳ Ikke bestemt |
-| ?? | Spørsmålsgenerering | Ukjent | ⏳ Ikke bestemt |
-| ?? | Lyd/lys-strategi | Ukjent | ⏳ Ikke bestemt |
+**Alternativer:**
+- FastAPI (Python) - Foreslått i originaldokument, god for læring
+- Express/Next.js (Node.js) - Samme språk som frontend
+- Supabase/Firebase - Managed backend, raskere å sette opp
+
+**Avgjørelse trengs før:** Nettverk/multiplayer eller Raspberry Pi-fasen
+(SQLite). Per 25.10.2026 er localStorage tilstrekkelig (beslutning 2.2).
 
 ---
 
-## 4. Konsekvenser av beslutninger
+## 4. Beslutningslogg
 
-### Kort sikt (MVP)
-- ✅ Rask utvikling uten backend-kompleksitet
-- ✅ Funksjonell prototype på < 1 uke
-- ✅ Kan testes umiddelbart av brukere
-- ⚠️ Begrenset data-persistens
+| Dato | Beslutning | Status |
+|------|-----------|--------|
+| 23.10.2026 | Designretning: TV Show | ✅ Bestemt |
+| 23.10.2026 | Teknologistack: React+Vite+Tailwind | ✅ Bestemt |
+| 23.10.2026 | Ingen backend i MVP | ✅ Bestemt |
+| 23.10.2026 | Tastatur-input først | ✅ Bestemt |
+| 23.10.2026 | Spillmotor i frontend | ✅ Bestemt |
+| 25.10.2026 | Streng spørsmålsuttrekk uten fallback | ✅ Bestemt |
+| 25.10.2026 | localStorage som lagring (SQLite til RPi-fasen) | ✅ Bestemt |
+| 25.10.2026 | Hierarkiske kategorier + sentral migreringsmap | ✅ Bestemt |
+| 25.10.2026 | Stabile IDer via FNV-1a/innholdshash | ✅ Bestemt |
+| 25.10.2026 | The Trivia API integrert (CC BY-NC 4.0) | ✅ Bestemt |
+| 25.10.2026 | Poeng adskilt fra statistikk | ✅ Bestemt |
+| 25.10.2026 | Timestamp-timer + duplikatbeskyttelse | ✅ Bestemt |
+| 25.10.2026 | Ingen AI-generering av spørsmål | ✅ Bestemt |
+| 25.10.2026 | Generisk input-hub (tastatur = én driver) | ✅ Bestemt |
+| 25.10.2026 | Playwright med TEST_PORT/TEST_BASE_URL | ✅ Bestemt |
+| 25.10.2026 | dist/ tas ut av git-sporing | ✅ Bestemt |
+| ?? | Kontroller-design (buzzer vs A/B/C/D) | ⏳ Ikke bestemt |
+| ?? | Lyd/lys-strategi | ⏳ Ikke bestemt |
+| ?? | Backend-teknologi (post-MVP) | ⏳ Ikke bestemt |
+
+---
+
+## 5. Konsekvenser av beslutninger
+
+### Kort sikt (nå)
+- ✅ Full spillflyt med statistikk, buzzer og team – testbar uten backend
+- ✅ 77 enhetstester + 24 E2E-tester passerer
 - ⚠️ Ingen deling mellom enheter
 
 ### Medium sikt (Fase 2-3)
-- 📋 localStorage for spørsmål og oppsett
-- 📋 Import/eksport for deling
-- 📋 Spillmotor ekstraheres til egen modul
+- 📋 Import/eksport for deling av spørsmålsbank
+- 📋 Pico 2-kontrollere via input-huben
 - 📋 Backend vurderes ved behov for multiplayer
 
 ### Lang sikt (Fase 4+)
 - 📋 FastAPI-backend hvis nettverk/multiplayer
-- 📋 SQLite-database for spørsmålsbank
-- 📋 Elektronikkintegrasjon med Pico 2
-- 📋 Raspberry Pi-konsoll
+- 📋 SQLite-database for spørsmålsbank (Raspberry Pi-fasen)
+- 📋 Raspberry Pi-konsoll i kiosk-modus
 
 ---
 
-## 5. Retningslinjer for fremtidige beslutninger
+## 6. Retningslinjer for fremtidige beslutninger
 
 1. **Bevar modularitet:** Nye funksjoner skal ikke bryte eksisterende arkitektur
 2. **TV-first:** Design- og UX-beslutninger prioriterer TV-opplevelse
-3. **Offline-first:** Ingen funksjonalitet skal kreve internett
-4. **KISS:** Velg den enkleste løsningen som fungerer
-5. **Testbarhet:** Alle beslutninger skal gjøre systemet lettere å teste
+3. **Offline-first:** Kjernen skal fungere uten internett
+4. **Ingen fallback som skjuler feil:** Hvis valgene ikke kan oppfylles, si det
+5. **Testbarhet:** Ren logikk i `src/core/`, UI tester med Playwright
 6. **Dokumenter:** Alle viktige beslutninger loggføres her
-
----
-
-*Sist oppdatert: 23. oktober 2026*
