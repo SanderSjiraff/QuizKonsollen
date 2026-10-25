@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 /**
  * Hovedflyter i QuizKrets.
@@ -337,6 +337,116 @@ test.describe('Lagmodus fra alle startpunkter (P1 #7)', () => {
     // var config.teams tom og lagdelen ble aldri rendret.
     await expect(page.getByText('Lag 1')).toBeVisible();
     await expect(page.getByText('Lag 2')).toBeVisible();
+  });
+});
+
+test.describe('Gjenbruk av spørsmål (P1 #8)', () => {
+  /** Lag en frøbank med n geografi-spørsmål og valgfrie brukte IDer. */
+  async function seedBank(page: Page, count: number, usedCount: number) {
+    const bank = Array.from({ length: count }, (_, i) => ({
+      id: `gjenbruk-${i + 1}`,
+      text: `Gjenbrukstest ${i + 1}: hva er ${i + 1} + 1?`,
+      type: 'multiple_choice',
+      difficulty: 'lett',
+      categories: ['geografi'],
+      choices: [
+        { id: 'a', text: String(i + 2) },
+        { id: 'b', text: 'Feil' },
+      ],
+      correctChoiceIds: ['a'],
+      source: 'manual',
+      sourceRef: 'E2E gjenbrukstest',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+    const usedIds = bank.slice(0, usedCount).map(q => q.id);
+    await page.addInitScript(({ bank, usedIds }) => {
+      localStorage.setItem('quizkrets_question_bank_v1', JSON.stringify(bank));
+      localStorage.setItem('quizkrets_question_bank_migrated_v1', 'done');
+      localStorage.setItem('quizkrets_used_question_ids', JSON.stringify(usedIds));
+    }, { bank, usedIds });
+  }
+
+  test('gjenbruk-knappen vises bare når gjenbruk faktisk dekker ønsket antall', async ({ page }) => {
+    // 3 spørsmål totalt, 1 brukt: 2 ubrukte. Ber om 5 – gjenbruk (3) kan
+    // ALDRI dekke 5, så knappen skal ikke vises som en felle.
+    await seedBank(page, 3, 1);
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+    await page.getByRole('button', { name: /Geografi/ }).first().click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: /Start quiz/ }).click();
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/2 ubrukte spørsmål/)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /Reduser antallet til 2/ })).toBeVisible();
+    // Gjenbruk dekker ikke 5 ønskede – knappen skal ikke tilbys
+    await expect(dialog.getByRole('button', { name: /Tillat gjenbruk/ })).toHaveCount(0);
+  });
+
+  test('tillat gjenbruk starter quizen med ønskede antall spørsmål', async ({ page }) => {
+    // 8 spørsmål totalt, 5 brukt: 3 ubrukte. Ber om 5 – gjenbruk (8)
+    // dekker 5, og quizen skal starte med 5 spørsmål.
+    await seedBank(page, 8, 5);
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+    await page.getByRole('button', { name: /Geografi/ }).first().click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: /Start quiz/ }).click();
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: /Tillat gjenbruk – 8 spørsmål tilgjengelig/ }).click();
+
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+    await expect(page.getByText('Spørsmål 1 av 5')).toBeVisible();
+  });
+});
+
+test.describe('Filimport av spørsmål (P1 #9)', () => {
+  test('CSV med én ugyldig rad importerer de gyldige og viser avvisningen radvis', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Start spill/ }).click();
+
+    // Filimport-siden må være tilgjengelig fra UI-et
+    await page.getByRole('button', { name: 'Importer fil' }).click();
+    await expect(page.getByRole('heading', { name: 'Importer spørsmål' })).toBeVisible();
+
+    // 2 gyldige rader + 1 rad med ugyldig fasit-bokstav
+    const csv = [
+      'text;type;difficulty;categories;correct;choice_a;choice_b;explanation',
+      'Hva er hovedstaden i Sverige?;multiple_choice;lett;geografi;a;Stockholm;Oslo;Stockholm er hovedstaden.',
+      'Hva er 2+2?;multiple_choice;lett;geografi;x;3;5;Denne raden har ugyldig fasit.',
+      'Hvilken elv er lengst?;multiple_choice;lett;geografi;a;Nilen;Amazonas;Nilen regnes som lengst.',
+    ].join('\n');
+
+    await page.locator('input[type="file"]').setInputFiles({
+      name: 'import-test.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(csv, 'utf-8'),
+    });
+
+    // Oppsummeringen viser 2 gyldige og 1 avvist – den ugyldige raden
+    // forkaster ikke lenger hele importen.
+    const summary = page.locator('.card', { hasText: 'Oppsummering' });
+    await expect(summary).toBeVisible();
+    await expect(summary.getByText('Hva er 2+2?')).toBeVisible();
+    await expect(summary.getByText(/Ugyldig fasit-bokstav "x"/)).toBeVisible();
+
+    // Importer de gyldige. ImportQuestions navigerer umiddelbart tilbake
+    // til GameSetup (bekreftelsesmeldingen vises ikke lenge).
+    await page.getByRole('button', { name: /Importer 2 spørsmål/ }).click();
+    await expect(page.getByRole('heading', { name: 'Start spill' })).toBeVisible();
+
+    // Verifiser at begge gyldige spørsmål faktisk ble lagret i banken
+    await page.getByRole('button', { name: 'Tilbake' }).first().click();
+    await page.getByRole('button', { name: /Spørsmålsbank/ }).click();
+    await page.getByLabel('Søk').fill('Hva er hovedstaden i Sverige?');
+    await expect(page.getByText('Hva er hovedstaden i Sverige?')).toBeVisible();
+    await page.getByLabel('Søk').fill('Hvilken elv er lengst?');
+    await expect(page.getByText('Hvilken elv er lengst?')).toBeVisible();
   });
 });
 

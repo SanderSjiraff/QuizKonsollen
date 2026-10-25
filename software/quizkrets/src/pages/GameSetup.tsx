@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowLeft, Play, Upload, Trophy, Dices, Users, AlertTriangle,
-  Check, CheckCircle2, Zap,
+  Check, CheckCircle2, Zap, FileUp,
 } from 'lucide-react';
 import type { GameConfig, SelectionError } from '../hooks/useGameEngine';
 import { getCategoryName } from '../core/categories';
@@ -27,6 +27,8 @@ interface GameSetupProps {
   onStart: (configUpdates: Partial<GameConfig>) => void;
   onScoreboard: () => void;
   onImportQuestions: () => void;
+  /** P1 #9: filimport (JSON/CSV) – ImportQuestions-siden. */
+  onImportFile: () => void;
 }
 
 interface QuizOption {
@@ -77,6 +79,7 @@ export default function GameSetup({
   onStart,
   onScoreboard,
   onImportQuestions,
+  onImportFile,
 }: GameSetupProps) {
   const savedQuizzes = getSavedQuizzes();
 
@@ -167,6 +170,10 @@ export default function GameSetup({
           </div>
         </div>
         <div className="flex gap-3">
+          <button onClick={onImportFile} className="btn-secondary flex items-center gap-2">
+            <FileUp className="w-5 h-5" />
+            Importer fil
+          </button>
           <button onClick={onImportQuestions} className="btn-secondary flex items-center gap-2">
             <Upload className="w-5 h-5" />
             Hent fra nettet

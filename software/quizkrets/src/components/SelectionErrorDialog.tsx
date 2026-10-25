@@ -86,7 +86,10 @@ export default function SelectionErrorDialog({
                 </button>
               )}
 
-              {error.availableWithReuse > error.available && (
+              {/* P1 #8: gjenbruk tilbys KUN når gjenbruk faktisk kan dekke det
+                  ønskede antallet – ellers ville knappen ført brukeren tilbake
+                  til den samme dialogen i en løkke. */}
+              {error.availableWithReuse >= error.requested && (
                 <button
                   onClick={onAllowReuse}
                   className="btn-secondary w-full py-4 flex items-center gap-3 text-lg"

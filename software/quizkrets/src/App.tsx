@@ -93,6 +93,7 @@ function App() {
             }}
             onScoreboard={() => game.navigateTo('scoreboard')}
             onImportQuestions={() => game.navigateTo('fetch-from-api')}
+            onImportFile={() => game.navigateTo('import-questions')}
           />
         );
       case 'scoreboard':

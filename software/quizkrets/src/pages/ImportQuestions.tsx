@@ -7,6 +7,7 @@ import {
 import type { Question } from '../types';
 import { addQuestions, normalizeText, StorageError } from '../data/questionStore';
 import { validateQuestionDraft, type ValidationIssue } from '../core/questionValidation';
+import { parseCsv, csvToDrafts } from '../core/csvImport';
 
 interface ImportQuestionsProps {
   onBack: () => void;
@@ -39,86 +40,6 @@ const TEMPLATE_JSON = `[
 const TEMPLATE_CSV = `text;type;difficulty;categories;correct;choice_a;choice_b;choice_c;choice_d;explanation
 Hva er hovedstaden i Norge?;multiple_choice;lett;geografi|norge;a;Oslo;Bergen;Trondheim;Stavanger;Oslo har vært hovedstad siden 1814.
 Norge er en monarki;true_false;lett;samfunn-og-kultur|politikk;a;Sant;Usant;;;`;
-
-/** Enkel CSV-parser som håndterer anførselstegn og semikolon. */
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let current: string[] = [];
-  let field = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (inQuotes) {
-      if (char === '"') {
-        if (text[i + 1] === '"') {
-          field += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        field += char;
-      }
-    } else if (char === '"') {
-      inQuotes = true;
-    } else if (char === ';') {
-      current.push(field);
-      field = '';
-    } else if (char === '\n') {
-      current.push(field);
-      field = '';
-      if (current.some(c => c.trim() !== '')) rows.push(current);
-      current = [];
-    } else if (char !== '\r') {
-      field += char;
-    }
-  }
-  current.push(field);
-  if (current.some(c => c.trim() !== '')) rows.push(current);
-  return rows;
-}
-
-/** Konverter CSV-rader (med overskrift) til spørsmålskladder. */
-function csvToDrafts(rows: string[][]): unknown[] {
-  if (rows.length < 2) return [];
-  const header = rows[0].map(h => h.trim().toLowerCase());
-  const idx = (name: string) => header.indexOf(name);
-  const drafts: unknown[] = [];
-
-  for (const row of rows.slice(1)) {
-    const get = (name: string) => {
-      const i = idx(name);
-      return i >= 0 ? (row[i] ?? '').trim() : '';
-    };
-    const choicesRaw = ['choice_a', 'choice_b', 'choice_c', 'choice_d', 'choice_e', 'choice_f']
-      .map(get)
-      .filter(t => t !== '');
-    if (choicesRaw.length === 0 && !get('text')) continue;
-
-    const letters = ['a', 'b', 'c', 'd', 'e', 'f'];
-    const correctLetter = get('correct').toLowerCase();
-    const choices = choicesRaw.map((text, i) => ({ id: letters[i], text }));
-    const correctIdx = letters.indexOf(correctLetter);
-    const correctId = correctIdx >= 0 && correctIdx < choices.length
-      ? letters[correctIdx]
-      : '';
-    if (correctId === '') {
-      throw new Error(`Ugyldig fasit-bokstav "${correctLetter}" for spørsmål: ${get('text').slice(0, 40)}...`);
-    }
-
-    drafts.push({
-      text: get('text'),
-      type: get('type') || (choices.length === 2 ? 'true_false' : 'multiple_choice'),
-      difficulty: get('difficulty') || 'lett',
-      categories: get('categories') ? get('categories').split('|').map(c => c.trim()).filter(Boolean) : [],
-      choices,
-      correctChoiceIds: [correctId],
-      explanation: get('explanation') || undefined,
-    });
-  }
-  return drafts;
-}
 
 /** Legg til ID og normaliser vanskelighet/type fra friere JSON-format. */
 function normalizeDraft(raw: unknown): unknown {
@@ -178,9 +99,14 @@ export default function ImportQuestions({ onBack, onImportComplete }: ImportQues
     try {
       const content = await file.text();
       let rawQuestions: unknown[] = [];
+      // P1 #9: CSV-rader med ugyldig fasit forkaster ikke lenger hele
+      // importen – de samles radvis og vises i «avvist»-listen.
+      let csvInvalid: { preview: string; issues: string[] }[] = [];
 
       if (file.name.toLowerCase().endsWith('.csv')) {
-        rawQuestions = csvToDrafts(parseCsv(content));
+        const result = csvToDrafts(parseCsv(content));
+        rawQuestions = result.drafts;
+        csvInvalid = result.invalid;
       } else {
         const parsed = JSON.parse(content);
         if (Array.isArray(parsed)) {
@@ -193,7 +119,7 @@ export default function ImportQuestions({ onBack, onImportComplete }: ImportQues
         }
       }
 
-      if (rawQuestions.length === 0) {
+      if (rawQuestions.length === 0 && csvInvalid.length === 0) {
         setError('Ingen spørsmål funnet i filen.');
         return;
       }
@@ -229,6 +155,10 @@ export default function ImportQuestions({ onBack, onImportComplete }: ImportQues
         seenTexts.add(textKey);
         newValid.push({ raw: normalized, preview: q, issues: [] });
       });
+
+      // CSV-rader med ugyldig fasit vises i samme «avvist»-liste som
+      // ugyldige JSON-spørsmål.
+      newInvalid.unshift(...csvInvalid);
 
       setValid(newValid);
       setInvalid(newInvalid);
