@@ -126,6 +126,27 @@ export function computePlayerStats(
   });
 }
 
+/** Andeler for resultatgrafen (P1 #4).
+ *
+ * Nevneren er summen av riktige + feil + ubesvarte – for en spiller er dette
+ * lik totalQuestions, og for et lag er det spillere × spørsmål (alle
+ * svarmuligheter i valgt spillmodus). Stolpene summerer seg dermed alltid
+ * til 100 %, uavhengig av antall spillere per lag.
+ */
+export function statsBarFractions(stats: {
+  correct: number;
+  wrong: number;
+  unanswered: number;
+}): { correct: number; wrong: number; unanswered: number } {
+  const total = stats.correct + stats.wrong + stats.unanswered;
+  if (total <= 0) return { correct: 0, wrong: 0, unanswered: 0 };
+  return {
+    correct: (stats.correct / total) * 100,
+    wrong: (stats.wrong / total) * 100,
+    unanswered: (stats.unanswered / total) * 100,
+  };
+}
+
 /** Aggreger spillernes statistikk til lagresultater.
  *
  * Når hver spiller svarer individuelt (hot-seat), er den totale mulige

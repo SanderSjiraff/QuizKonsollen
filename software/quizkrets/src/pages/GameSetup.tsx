@@ -39,6 +39,8 @@ interface QuizOption {
   timePerQuestion: number;
   pointsPerCorrect: number;
   pointsPerWrong: number;
+  /** Kategorivekter fra preset/lagret quiz – gjenopprettes ved start. */
+  categoryWeights?: Record<string, number>;
   kind: 'preset' | 'saved';
 }
 
@@ -93,6 +95,7 @@ export default function GameSetup({
       timePerQuestion: p.rounds[0]?.timeLimit ?? 20,
       pointsPerCorrect: p.rounds[0]?.pointsPerCorrect ?? 100,
       pointsPerWrong: p.rounds[0]?.pointsPerWrong ?? 0,
+      categoryWeights: p.categoryWeights,
       kind: 'preset',
     }));
     const saved: QuizOption[] = savedQuizzes.map(s => ({
@@ -105,6 +108,7 @@ export default function GameSetup({
       timePerQuestion: s.preset.rounds[0]?.timeLimit ?? 20,
       pointsPerCorrect: s.preset.rounds[0]?.pointsPerCorrect ?? 100,
       pointsPerWrong: s.preset.rounds[0]?.pointsPerWrong ?? 0,
+      categoryWeights: s.preset.categoryWeights,
       kind: 'saved',
     }));
     return [...saved, ...presets];
@@ -127,6 +131,8 @@ export default function GameSetup({
       pointsPerCorrect: 100,
       pointsPerWrong: 0,
       bonusForSpeed: false,
+      // Tilfeldig quiz skal aldri arve vekter fra en tidligere quiz
+      categoryWeights: {},
     });
   };
 
@@ -141,6 +147,9 @@ export default function GameSetup({
       pointsPerCorrect: quiz.pointsPerCorrect,
       pointsPerWrong: quiz.pointsPerWrong,
       bonusForSpeed: false,
+      // Gjenopprett quizens egne vekter; {} nullstiller ev. vekter fra
+      // en tidligere quiz (startGame fletter grunne).
+      categoryWeights: quiz.categoryWeights ?? {},
     });
   };
 

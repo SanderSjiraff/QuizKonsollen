@@ -1,4 +1,5 @@
 import type { QuizPreset } from '../types';
+import type { GameConfig } from '../hooks/useGameEngine';
 
 interface StoredQuiz {
   id: string;
@@ -9,6 +10,29 @@ interface StoredQuiz {
 }
 
 const STORAGE_KEY = 'quizkrets_saved_quizzes';
+
+/**
+ * Map en QuizPreset til config-overstyringer for startGame (P1 #5).
+ *
+ * `categoryWeights` oppgis ALLTID eksplisitt (også som {} for preseter
+ * uten vekter): startGame fletter configUpdates grunne over eksisterende
+ * config, så vekter fra en tidligere quiz skal aldri følge med i en ny.
+ */
+export function presetToConfigUpdates(preset: QuizPreset): Partial<GameConfig> {
+  const round = preset.rounds[0];
+  return {
+    quizName: preset.name,
+    selectedCategories: preset.categories,
+    selectedDifficulties: preset.difficulties,
+    questionCount: preset.questionCount,
+    gameMode: round?.mode ?? 'classic',
+    timePerQuestion: round?.timeLimit ?? 20,
+    pointsPerCorrect: round?.pointsPerCorrect ?? 100,
+    pointsPerWrong: round?.pointsPerWrong ?? 0,
+    bonusForSpeed: round?.bonusForSpeed ?? false,
+    categoryWeights: preset.categoryWeights ?? {},
+  };
+}
 
 export function saveQuizPreset(preset: QuizPreset): void {
   try {

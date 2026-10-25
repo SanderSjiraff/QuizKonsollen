@@ -12,47 +12,35 @@
 - Bevar eksisterende API der mulig; små endringer.
 - Ikke slett brukerdata automatisk.
 
-## Task 1: P0 #1 – Position-basert svarvalg (inputEvents + GamePlay)
+## Task 1: P0 #1 – Position-basert svarvalg ✅ (commit 2a5a686)
 
-**Files:**
-- Modify: `src/core/inputEvents.ts` (PLAYER_ANSWER bærer `choiceIndex`)
-- Modify: `src/pages/GamePlay.tsx` (slår opp choiceId fra `question.choices[choiceIndex]`)
-- Test: `src/core/__tests__/inputEvents.test.ts` (ny)
+- `PLAYER_ANSWER` bærer `choiceIndex`; GamePlay slår opp faktisk `choiceId` i gjeldende spørsmål.
+- 9 nye enhetstester for KeyboardDriver (node-miljø, DOM-mock uten jsdom).
+- E2E-regresjonstest med stokket svarrekkefølge; RED→GRØNN verifisert på begge nivåer.
+- Oppdaget og håndterte timing-hull i E2E (input-lytter registreres i effect etter commit).
 
-**Interfaces:**
-- `PLAYER_ANSWER`-hendelse: `{ type: 'PLAYER_ANSWER'; playerId: number; choiceIndex: number; timestamp: number }`
-- GamePlay: `const choice = questionRef.current?.choices[event.choiceIndex]; submitAnswer(playerId, choice.id)`
+## Task 2: P0 #2 – Aldri slett data ved lagringsfeil ✅ (commit c6ef588)
 
-**Steg:**
-- [ ] Skriv feilende test: KeyboardDriver med taste '1' og choiceCount 4 → hendelse `choiceIndex: 0`. Taste 'a' → `choiceIndex: 0`, 'b' → 1.
-- [ ] Verifiter at testen feiler (choiceId finnes, choiceIndex mangler).
-- [ ] Endre GameInputEvent og KeyboardDriver til å sende choiceIndex.
-- [ ] Oppdater GamePlay til å slå opp choiceId fra gjeldende spørsmål (bounds-sjekk).
-- [ ] E2E: verifiser tastaturtest med stokkede alternativer passerer.
-- [ ] Commit.
+- `writeBank`: ved feil er eksisterende localStorage urørt; StorageError med eksport-hint.
+- `initQuestionBank`: les-tilbake-verifikasjon før MIGRATED_KEY settes; krasjer ikke ved full kvote.
+- 6 nye tester (kvote ved tillegg/endring/sletting, migrering ved full kvote, delvis lagring, normal migrering).
+- UI-feilhåndtering: QuestionBank (beholder dialog åpen), ImportQuestions, FetchFromAPI.
 
-## Task 2: P0 #2 – Aldri slett data ved lagringsfeil
+## Task 3: P0 #3 – Robust kategorivekting ✅ (commit 5c75514)
 
-**Files:**
-- Modify: `src/data/questionStore.ts` (writeBank: bevar data, kast tydelig feil)
-- Test: `src/data/__tests__/questionStore.test.ts` (utvid)
+- `selectWeighted`: størrest-rest-kvoter (sum = target), egen kategorimatching via `expandSelection([kategori])`, iterativ omfordeling med vektet fair queuing, `taken`-sett mot overlapp.
+- 8 nye tester; 5× påfølgende kjøringer 22/22 stabile.
 
-**Steg:**
-- [ ] Skriv feilende test: kvotefeil (mock localStorage.setItem kaster QuotaExceededError) → gammel bank intakt, StorageError kastes med eksport-hint.
-- [ ] Skriv test: migrering markeres IKKE som fullført når writeBank feiler.
-- [ ] Fjern pruning fra writeBank; behold gammel lagring urørt; kast StorageError.
-- [ ] Verifiter at enhetstester og E2E (spørsmålsbank CRUD) passerer.
-- [ ] Commit.
+## Verifikasjon P0 (total)
 
-## Task 3: P0 #3 – Robust kategorivekting
+- Enhetstester: 103/103 · E2E: 15/15 · TypeScript-bygg: OK
 
-**Files:**
-- Modify: `src/core/questionSelector.ts` (selectDistributed)
-- Test: `src/core/__tests__/questionSelector.test.ts` (utvid)
+## Neste: P1 #4–#10
 
-**Steg:**
-- [ ] Skriv feilende test: 20 spørsmål, vekter {historie: 50, sport: 30, teknologi: 20} → 10/6/4.
-- [ ] Skriv tester: utilstrekkelig pool (omfordeling), overlappende kategorier, avrundingskant (f.eks. count=10 med 3 kategorier 50/30/20).
-- [ ] Rett vektfilter (verdi, ikke nøkkel), kategorispesifikk matching, largest-remainder-fordeling med omfordeling ved utilstrekkelig utvalg.
-- [ ] Verifiter alle tester.
-- [ ] Commit.
+- Results.tsx: nevner i resultatgraf
+- App.tsx: categoryWeights i lagrede quizer
+- backToLobby(): nullstilling av sesjon
+- Lagstruktur fra alle startpunkter
+- Spørsmålsgjenbruk (< antall ønsket)
+- CSV-import-validering
+- Pause vs. hastighetsbonus, buzzer-lås

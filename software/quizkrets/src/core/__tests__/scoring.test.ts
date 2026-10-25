@@ -4,6 +4,7 @@ import {
   computePlayerStats,
   computeTeamResults,
   rankPlayers,
+  statsBarFractions,
   type AnswerRecord,
   type ScoreConfig,
 } from '../scoring';
@@ -150,5 +151,34 @@ describe('computeTeamResults', () => {
     expect(lagA.correct).toBe(1);
     expect(lagB.totalPoints).toBe(0);
     expect(lagB.wrong).toBe(1);
+  });
+});
+
+describe('statsBarFractions (resultatgraf, P1 #4)', () => {
+  it('spiller: andelene summerer seg til 100 med totalQuestions som nevner', () => {
+    // Spiller med 10 spørsmål: 5 riktige, 2 feil, 3 ubesvarte
+    const f = statsBarFractions({ correct: 5, wrong: 2, unanswered: 3 });
+    expect(f.correct).toBe(50);
+    expect(f.wrong).toBe(20);
+    expect(f.unanswered).toBe(30);
+    expect(f.correct + f.wrong + f.unanswered).toBeCloseTo(100);
+  });
+
+  it('lag: nevneren er summen over ALLE svamuligheter (spillere × spørsmål)', () => {
+    // Lag med 2 spillere × 10 spørsmål = 20 svarmuligheter:
+    // 8 riktige, 4 feil, 8 ubesvarte. Med gammel feil nevner (10) ble
+    // stolpene 200 % av bredden; nå skal de summere seg til 100 %.
+    const f = statsBarFractions({ correct: 8, wrong: 4, unanswered: 8 });
+    expect(f.correct).toBe(40);
+    expect(f.wrong).toBe(20);
+    expect(f.unanswered).toBe(40);
+    expect(f.correct + f.wrong + f.unanswered).toBeCloseTo(100);
+  });
+
+  it('null svarmuligheter gir tom graf uten divisjon med null', () => {
+    const f = statsBarFractions({ correct: 0, wrong: 0, unanswered: 0 });
+    expect(f.correct).toBe(0);
+    expect(f.wrong).toBe(0);
+    expect(f.unanswered).toBe(0);
   });
 });

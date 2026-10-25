@@ -241,6 +241,42 @@ test.describe('Tastaturnavigasjon under spill', () => {
   });
 });
 
+test.describe('Kategorivekting i lagrede quizer (P1 #5)', () => {
+  test('vekter lagres med quizen og gjenopprettes ved lasting', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+
+    // Bygg quiz: 100 % historie, 0 % sport
+    await page.getByRole('button', { name: /Historie/ }).first().click();
+    await page.getByRole('button', { name: /Sport/ }).first().click();
+    await page.getByLabel('Vekt for Historie').fill('100');
+    await page.getByLabel('Quiznavn').fill('Vektet lagresjekk');
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: /Lagre quiz/ }).click();
+
+    // Tilbake til hovedmenyen og last den lagrede quizen
+    await page.getByRole('button', { name: 'Tilbake' }).click();
+    await page.getByRole('button', { name: /Lagrede quizer/ }).first().click();
+    const card = page.locator('div.card', { hasText: 'Vektet lagresjekk' });
+    await card.getByRole('button', { name: 'Spill' }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    // Vektene skal være gjenopprettet: ALLE 5 spørsmål kommer fra
+    // historie-poolen. Frøbankens sport-spørsmål har kun sport-kategorier,
+    // så de kan aldri vises med 100 % historie-vekt. Uten gjenopprettede
+    // vekter ville jevn fordeling over historie+sport trukket sport-
+    // spørsmål med ~98 % sannsynlighet.
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      await expect(page.getByText(/• sport/)).toHaveCount(0);
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+
+    await expect(page.getByText(/vinner!/)).toBeVisible();
+  });
+});
+
 test.describe('Buzzer-modus', () => {
   test('spiller buzzer med tast, svarer, og de andre får ubesvart', async ({ page }) => {
     await page.goto('/');

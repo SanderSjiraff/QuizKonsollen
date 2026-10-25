@@ -5,7 +5,7 @@ import {
   CheckCircle2, XCircle, HelpCircle, Clock, Users, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import type { Question } from '../types';
-import type { PlayerStats, TeamResult, AnswerRecord } from '../core/scoring';
+import { statsBarFractions, type PlayerStats, type TeamResult, type AnswerRecord } from '../core/scoring';
 
 interface ResultsProps {
   rankedPlayers: PlayerStats[];
@@ -27,14 +27,19 @@ function formatDuration(ms: number): string {
   return minutes > 0 ? `${minutes} min ${seconds} sek` : `${seconds} sek`;
 }
 
-/** Stabelbar per spiller: riktig / feil / ubesvart. */
-function StatsBar({ stats }: { stats: PlayerStats }) {
-  const total = Math.max(1, stats.totalQuestions);
+/** Stabelbar per spiller: riktig / feil / ubesvart.
+ *
+ * Andelene beregnes av statsBarFractions: nevneren er summen av alle
+ * svarmuligheter (spillere × spørsmål i valgt modus), slik at stolpene
+ * alltid summerer seg til 100 % – også for lag med flere spillere.
+ */
+function StatsBar({ stats }: { stats: Pick<PlayerStats, 'correct' | 'wrong' | 'unanswered'> & { playerName: string } }) {
+  const fractions = statsBarFractions(stats);
   return (
-    <div className="flex h-4 rounded-full overflow-hidden bg-bg-elevated w-full max-w-md" role="img" aria-label={`${stats.correct} riktige, ${stats.wrong} feil, ${stats.unanswered} ubesvarte`}>
-      <div className="bg-success" style={{ width: `${(stats.correct / total) * 100}%` }} />
-      <div className="bg-error" style={{ width: `${(stats.wrong / total) * 100}%` }} />
-      <div className="bg-border/60" style={{ width: `${(stats.unanswered / total) * 100}%` }} />
+    <div className="flex h-4 rounded-full overflow-hidden bg-bg-elevated w-full max-w-md" role="img" aria-label={`${stats.playerName}: ${stats.correct} riktige, ${stats.wrong} feil, ${stats.unanswered} ubesvarte`}>
+      <div className="bg-success" style={{ width: `${fractions.correct}%` }} />
+      <div className="bg-error" style={{ width: `${fractions.wrong}%` }} />
+      <div className="bg-border/60" style={{ width: `${fractions.unanswered}%` }} />
     </div>
   );
 }
@@ -127,17 +132,10 @@ export default function Results({
                   <span className="font-display text-2xl text-primary">{team.totalPoints} p</span>
                 </div>
                 <StatsBar stats={{
-                  playerId: team.teamId,
                   playerName: team.name,
-                  playerColor: team.color,
                   correct: team.correct,
                   wrong: team.wrong,
                   unanswered: team.unanswered,
-                  answered: team.correct + team.wrong,
-                  totalQuestions: team.players[0]?.totalQuestions ?? 0,
-                  accuracy: team.accuracy,
-                  totalPoints: team.totalPoints,
-                  avgAnswerTimeMs: null,
                 }} />
                 <p className="text-text-secondary text-sm mt-2">
                   {team.correct} riktige • {team.accuracy} % treffprosent

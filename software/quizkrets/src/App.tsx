@@ -12,7 +12,7 @@ import Scoreboard from './pages/Scoreboard';
 import ImportQuestions from './pages/ImportQuestions';
 import FetchFromAPI from './pages/FetchFromAPI';
 import QuestionSources from './pages/QuestionSources';
-import { saveQuizPreset } from './data/savedQuizzes';
+import { saveQuizPreset, presetToConfigUpdates } from './data/savedQuizzes';
 import type { QuizPreset, Difficulty } from './types';
 import type { GameConfig } from './hooks/useGameEngine';
 
@@ -20,21 +20,10 @@ function App() {
   const game = useGameEngine();
 
   const handleLoadPreset = (preset: QuizPreset) => {
-    const round = preset.rounds[0];
-    // configUpdates sikrer at uttrekket bruker preset-verdiene umiddelbart.
-    game.startGame({
-      configUpdates: {
-        quizName: preset.name,
-        selectedCategories: preset.categories,
-        selectedDifficulties: preset.difficulties,
-        questionCount: preset.questionCount,
-        gameMode: round?.mode ?? 'classic',
-        timePerQuestion: round?.timeLimit ?? 20,
-        pointsPerCorrect: round?.pointsPerCorrect ?? 100,
-        pointsPerWrong: round?.pointsPerWrong ?? 0,
-        bonusForSpeed: round?.bonusForSpeed ?? false,
-      },
-    });
+    // configUpdates sikrer at uttrekket bruker preset-verdiene umiddelbart,
+    // inkludert lagrede kategorivekter (presetToConfigUpdates oppgir dem
+    // alltid eksplisitt, slik at gamle vekter nullstilles).
+    game.startGame({ configUpdates: presetToConfigUpdates(preset) });
   };
 
   const currentQuestion = game.questions[game.currentQuestionIndex];
@@ -64,7 +53,8 @@ function App() {
                 categories: game.config.selectedCategories,
                 difficulties: game.config.selectedDifficulties as Difficulty[],
                 questionCount: game.config.questionCount,
-                categoryWeights: {},
+                // Lagre faktiske vekter fra quizbyggeren (ikke tomt objekt)
+                categoryWeights: game.config.categoryWeights ?? {},
                 rounds: [
                   {
                     mode: game.config.gameMode,
