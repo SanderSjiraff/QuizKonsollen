@@ -523,6 +523,85 @@ test.describe('Buzzer-modus', () => {
   });
 });
 
+test.describe('Kategori-etikett viser matchende kategori (P2 #11)', () => {
+  test('spørsmål valgt via historie-underkategori viser historie-etiketten, ikke sport', async ({ page }) => {
+    // 5 spørsmål der 'sport' står FØRST i kategorilisten, men som bare kan
+    // velges gjennom 'historiske-personer' (underkategori av historie).
+    const bank = Array.from({ length: 5 }, (_, i) => ({
+      id: `etikett-${i + 1}`,
+      text: `Etikettest ${i + 1}: hvem var person nummer ${i + 1} i historien?`,
+      type: 'multiple_choice',
+      difficulty: 'lett',
+      categories: ['sport', 'historiske-personer'],
+      choices: [
+        { id: 'a', text: `Person ${i + 1}` },
+        { id: 'b', text: 'Ingen' },
+      ],
+      correctChoiceIds: ['a'],
+      source: 'manual',
+      sourceRef: 'E2E etikettest',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }));
+    await page.addInitScript(bank => {
+      localStorage.setItem('quizkrets_question_bank_v1', JSON.stringify(bank));
+      localStorage.setItem('quizkrets_question_bank_migrated_v1', 'done');
+    }, bank);
+
+    await page.goto('/');
+    await page.getByRole('button', { name: /Bygg quiz/ }).click();
+    await page.getByRole('button', { name: /Historie/ }).first().click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: /Start quiz/ }).click();
+    await page.getByRole('button', { name: 'Start spillet!' }).click();
+
+    for (let i = 0; i < 5; i++) {
+      await expect(page.getByText(`Spørsmål ${i + 1} av 5`)).toBeVisible();
+      // Etiketten må vise kategorien som matchet valget (Historie →
+      // 'Historiske personer'), ikke 'sport' som tilfeldigvis står først.
+      await expect(page.getByText(/Historiske personer/)).toBeVisible();
+      await expect(page.getByText(/• sport/i)).toHaveCount(0);
+      await page.locator('[data-testid="choice-0"]').click();
+      await page.locator('[data-testid="next-question"]').click();
+    }
+  });
+});
+
+test.describe('Tilgjengelighet på ikon-knapper (P2 #12)', () => {
+  test('Tilbake-knapper på alle sider har tilgjengelig navn og fungerer', async ({ page }) => {
+    await page.goto('/');
+
+    // Lagrede quizer
+    await page.getByRole('button', { name: 'Lagrede quizer' }).click();
+    const tilbakeSaved = page.getByRole('button', { name: 'Tilbake' });
+    await expect(tilbakeSaved).toBeVisible();
+    await tilbakeSaved.click();
+    await expect(page.getByRole('heading', { name: 'QuizKrets' })).toBeVisible();
+
+    // Poengtavle (Tilbake går til GameSetup – deretter hovedmenyen)
+    await page.getByRole('button', { name: 'Poengtavle' }).click();
+    await expect(page.getByRole('button', { name: 'Tilbake' })).toBeVisible();
+    await page.getByRole('button', { name: 'Tilbake' }).click();
+    await expect(page.getByRole('heading', { name: 'Start spill' })).toBeVisible();
+    await page.getByRole('button', { name: 'Tilbake' }).click();
+    await expect(page.getByRole('heading', { name: 'QuizKrets' })).toBeVisible();
+
+    // Spørsmålsideer
+    await page.getByRole('button', { name: 'Spørsmålsideer' }).click();
+    await expect(page.getByRole('button', { name: 'Tilbake' })).toBeVisible();
+    await page.getByRole('button', { name: 'Tilbake' }).click();
+    await expect(page.getByRole('heading', { name: 'QuizKrets' })).toBeVisible();
+
+    // Lobby: Tilbake og Bytt farge-knapp
+    await page.getByRole('button', { name: /Start spill/ }).click();
+    await page.getByLabel('Antall spørsmål').fill('5');
+    await page.getByRole('button', { name: 'Start tilfeldig quiz' }).click();
+    await expect(page.getByText('Spillerlobby')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Tilbake' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Bytt farge/ })).toBeVisible();
+  });
+});
+
 test.describe('Streng spørsmålsuttrekk (ingen fallback)', () => {
   // 'Generell kunnskap' har 4 lette/middle spørsmål i frøbanken –
   // standardantallet er 10, så valgene kan ikke oppfylles.

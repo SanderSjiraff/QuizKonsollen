@@ -131,6 +131,7 @@ function App() {
             onPause={game.pauseGame}
             onResume={game.resumeGame}
             questionAnswers={currentQuestion ? game.getQuestionAnswers(currentQuestion.id) : []}
+            selectedCategories={game.config.selectedCategories}
           />
         );
       case 'results':

@@ -4,11 +4,11 @@ import {
   matchesSelection,
   expandSelection,
   getTopLevelCategory,
+  pickDisplayCategory,
   UNRESOLVED_CATEGORY,
 } from '../categories';
 
-describe('migrateCategories', () => {
-  it('mapper gamle interne navn til nye IDer', () => {
+describe('migrateCategories', () => {  it('mapper gamle interne navn til nye IDer', () => {
     expect(migrateCategories(['naturvitenskap'])).toContain('vitenskap');
     expect(migrateCategories(['vitenskap_natur'])).toContain('vitenskap');
     expect(migrateCategories(['videospill'])).toContain('gaming');
@@ -69,5 +69,42 @@ describe('getTopLevelCategory', () => {
     expect(getTopLevelCategory('fysikk')).toBe('vitenskap');
     expect(getTopLevelCategory('historie')).toBe('historie');
     expect(getTopLevelCategory('finnes-ikke')).toBeUndefined();
+  });
+});
+
+describe('pickDisplayCategory (P2 #11: etikett viser matchende kategori)', () => {
+  it('viser kategorien som matchet valget – ikke første tilfeldige kategori', () => {
+    // q12-mønster: teknologi-først, men valgt via historie-underkategori
+    const cats = ['teknologi', 'datamaskiner', 'historiske-personer'];
+    expect(pickDisplayCategory(cats, ['historie'])).toBe('historiske-personer');
+  });
+
+  it('viser direkte valgt hovedkategori når den fins på spørsmålet', () => {
+    expect(pickDisplayCategory(['teknologi', 'datamaskiner'], ['teknologi'])).toBe('teknologi');
+  });
+
+  it('viser direkte valgt underkategori', () => {
+    expect(
+      pickDisplayCategory(['sport', 'historiske-personer'], ['historiske-personer'])
+    ).toBe('historiske-personer');
+  });
+
+  it('flere valg: første spørsmålskategori som matcher vises', () => {
+    expect(
+      pickDisplayCategory(['sport', 'fotball'], ['historie', 'sport'])
+    ).toBe('sport');
+  });
+
+  it('ingen match: fall tilbake på første kategori', () => {
+    expect(pickDisplayCategory(['sport', 'fotball'], ['historie'])).toBe('sport');
+  });
+
+  it('tomt valg gir første kategori', () => {
+    expect(pickDisplayCategory(['sport', 'fotball'], [])).toBe('sport');
+  });
+
+  it('tom kategoriliste gir undefined', () => {
+    expect(pickDisplayCategory([], ['historie'])).toBeUndefined();
+    expect(pickDisplayCategory([], [])).toBeUndefined();
   });
 });

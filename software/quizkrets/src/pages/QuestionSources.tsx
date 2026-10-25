@@ -170,7 +170,7 @@ export default function QuestionSources({ onBack }: QuestionSourcesProps) {
     <div className="min-h-screen p-6 md:p-12">
       {/* Header */}
       <div className="flex items-center gap-4 mb-8">
-        <button onClick={onBack} className="btn-secondary p-3">
+        <button onClick={onBack} className="btn-secondary p-3" aria-label="Tilbake">
           <ArrowLeft className="w-6 h-6" />
         </button>
         <div>

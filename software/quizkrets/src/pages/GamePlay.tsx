@@ -5,6 +5,7 @@ import type { Question, Player } from '../types';
 import type { AnswerRecord } from '../core/scoring';
 import { useTimer } from '../hooks/useTimer';
 import { InputHub, KeyboardDriver } from '../core/inputEvents';
+import { pickDisplayCategory, getCategoryName } from '../core/categories';
 
 interface GamePlayProps {
   question: Question | undefined;
@@ -23,6 +24,8 @@ interface GamePlayProps {
   onResume?: () => void;
   /** Svar registrert så langt for gjeldende spørsmål. */
   questionAnswers: AnswerRecord[];
+  /** Kategorier brukeren valgte for quizen – styrer kategori-etiketten (P2 #11). */
+  selectedCategories?: string[];
 }
 
 /** Fase i svarflyten for ett spørsmål. */
@@ -43,6 +46,7 @@ export default function GamePlay({
   onPause,
   onResume,
   questionAnswers,
+  selectedCategories = [],
 }: GamePlayProps) {
   const reducedMotion = useReducedMotion();
   const [phase, setPhase] = useState<Phase>('answering');
@@ -274,7 +278,12 @@ export default function GamePlay({
             </p>
             <p className="text-text-muted text-xs capitalize">
               {question.difficulty}
-              {question.categories[0] ? ` • ${question.categories[0]}` : ''}
+              {(() => {
+                // P2 #11: vis kategorien som matchet brukerens valg –
+                // ikke nødvendigvis spørsmålets første kategori.
+                const cat = pickDisplayCategory(question.categories, selectedCategories);
+                return cat ? ` • ${getCategoryName(cat)}` : '';
+              })()}
             </p>
           </div>
         </div>

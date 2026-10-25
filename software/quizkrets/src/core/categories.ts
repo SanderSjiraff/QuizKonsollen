@@ -235,6 +235,27 @@ export function matchesSelection(questionCategories: string[], selected: string[
   return questionCategories.some(c => expanded.has(c));
 }
 
+/**
+ * Velg hvilken kategori som skal vises for et spørsmål (P2 #11).
+ *
+ * Viser kategorien som matchet brukerens valg (direkte eller via
+ * underkategori-utvidelse) – slik at et spørsmål valgt gjennom
+ * «Historie» vises med sin historie-kategori, ikke med spørsmålets
+ * første tilfeldige kategori. Uten match vises første kategori.
+ */
+export function pickDisplayCategory(
+  questionCategories: string[],
+  selected: string[]
+): string | undefined {
+  if (questionCategories.length === 0) return undefined;
+  if (selected.length > 0) {
+    const expanded = expandSelection(selected);
+    const match = questionCategories.find(c => expanded.has(c));
+    if (match) return match;
+  }
+  return questionCategories[0];
+}
+
 /** Visningsnavn for én kategori-ID ('historie' → 'Historie'). */
 export function getCategoryName(categoryId: string): string {
   return CATEGORY_BY_ID.get(categoryId)?.name ?? categoryId;

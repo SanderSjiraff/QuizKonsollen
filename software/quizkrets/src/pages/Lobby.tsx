@@ -32,7 +32,7 @@ export default function Lobby({ players, updatePlayer, onStart, onBack }: LobbyP
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="btn-secondary p-3">
+          <button onClick={onBack} className="btn-secondary p-3" aria-label="Tilbake">
             <ArrowLeft className="w-6 h-6" />
           </button>
           <h1 className="tv-heading text-primary">Spillerlobby</h1>
@@ -64,6 +64,7 @@ export default function Lobby({ players, updatePlayer, onStart, onBack }: LobbyP
                 className="absolute top-4 right-4 w-10 h-10 rounded-full border-2 border-white/20 hover:scale-110 transition-transform"
                 style={{ backgroundColor: player.color }}
                 title="Bytt farge"
+                aria-label={`Bytt farge for ${player.name}`}
               >
                 <Palette className="w-5 h-5 text-white/80 mx-auto" />
               </button>
