@@ -31,11 +31,17 @@ export interface StoredQuestion extends Question {
   updatedAt: string;
   /** True hvis kategorien ikke kunne migreres sikkert og må kvalitetssikres. */
   needsReview?: boolean;
+  /** Opprinnelige tags fra leverandøren (The Trivia API e.l.) */
+  providerTags?: string[];
+  /** Leverandørens kategori-ID. */
+  providerCategory?: string;
+  /** Leverandørens spørsmåls-ID. */
+  providerQuestionId?: string;
 }
 
 const BANK_KEY = 'quizkrets_question_bank_v1';
 const MIGRATED_KEY = 'quizkrets_question_bank_migrated_v1';
-const MAX_QUESTIONS = 5000;
+export const MAX_QUESTIONS = 5000;
 
 /** Gamle lagringsnøkler som migreres inn i banken. */
 const LEGACY_KEYS = {
@@ -77,15 +83,82 @@ export function stableQuestionId(source: QuestionSource, text: string): string {
 // Persistens
 // ---------------------------------------------------------------------------
 
-function readBank(): StoredQuestion[] {
+// ---------------------------------------------------------------------------
+// Korrupt data-håndtering
+// ---------------------------------------------------------------------------
+
+/** Resultat fra forsøk på å lese banken. */
+export interface ReadBankResult {
+  /** 'ok' = gyldig data, 'empty' = ingen data, 'corrupt' = ugyldig JSON/struktur */
+  status: 'ok' | 'empty' | 'corrupt';
+  data: StoredQuestion[];
+  /** Rå data som ikke kunne parses (for feilsøking/gjenoppretting). */
+  rawData?: string;
+  /** Feilmelding ved korrupt data. */
+  error?: string;
+}
+
+/**
+ * Les bank fra localStorage med tydelig skille mellom:
+ * - Ingen eksisterende data (status: 'empty')
+ * - Gyldig tom bank (status: 'ok', data: [])
+ * - Korrupte data (status: 'corrupt') – IKKE erstatt med tom bank
+ */
+function readBankWithStatus(): ReadBankResult {
   try {
     const data = localStorage.getItem(BANK_KEY);
-    if (!data) return [];
-    const parsed = JSON.parse(data);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+    if (!data) {
+      return { status: 'empty', data: [] };
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch (parseError) {
+      return {
+        status: 'corrupt',
+        data: [],
+        rawData: data,
+        error: `Ugyldig JSON i spørsmålsbanken: ${(parseError as Error).message}`,
+      };
+    }
+
+    if (!Array.isArray(parsed)) {
+      return {
+        status: 'corrupt',
+        data: [],
+        rawData: data,
+        error: 'Spørsmålsbanken inneholder ikke en gyldig array.',
+      };
+    }
+
+    // Gyldig data – kan være tom array eller array med spørsmål
+    return { status: 'ok', data: parsed as StoredQuestion[] };
+  } catch (accessError) {
+    // Feil ved tilgang til localStorage (f.eks. disk full, sikkerhetsbegrensning)
+    return {
+      status: 'corrupt',
+      data: [],
+      error: `Kunne ikke lese localStorage: ${(accessError as Error).message}`,
+    };
   }
+}
+
+function readBank(): StoredQuestion[] {
+  const result = readBankWithStatus();
+  if (result.status === 'corrupt') {
+    // Logg feilen men IKKE erstatt eksisterende data med tom bank.
+    // Kaster tydelig feil slik at kalleren kan tilby eksport/gjenoppretting.
+    console.error('Korrupt spørsmålsbank oppdaget:', result.error);
+    throw new StorageError(
+      `${result.error} \n\n` +
+        `Eksisterende spørsmål er bevart i localStorage, men kan ikke leses automatisk. ` +
+        `Bruk nettleserens utviklerverktøy (F12 → Application → Local Storage) ` +
+        `for å kopiere rådata fra nøkkelen "${BANK_KEY}" som backup. ` +
+        `Rett feilen i JSON-strukturen, eller rydd lagringen og gjenopprett fra en eksportert backup.`
+    );
+  }
+  return result.data;
 }
 
 /**
@@ -103,9 +176,16 @@ export class StorageError extends Error {
 }
 
 function writeBank(bank: StoredQuestion[]): void {
-  const toWrite = bank.slice(-MAX_QUESTIONS);
+  if (bank.length > MAX_QUESTIONS) {
+    throw new StorageError(
+      `Spørsmålsbanken er full (${bank.length} av ${MAX_QUESTIONS} spørsmål). ` +
+      `Nye spørsmål kan ikke legges til uten å overskride kapasitetsgrensen. ` +
+      `Eksporter spørsmålsbanken (Spørsmålsbank → Eksporter), rydd opp i ubrukte eller dupliserte spørsmål, og prøv igjen.`
+    );
+  }
+
   try {
-    localStorage.setItem(BANK_KEY, JSON.stringify(toWrite));
+    localStorage.setItem(BANK_KEY, JSON.stringify(bank));
   } catch (error) {
     const e = error as Error;
     const isQuota = e.name === 'QuotaExceededError' || /quota|storage/i.test(e.message);
@@ -125,13 +205,17 @@ function writeBank(bank: StoredQuestion[]): void {
  * Migreringen markeres aldri som fullført uten denne verifikasjonen.
  */
 function verifyPersisted(expected: StoredQuestion[]): void {
-  const toVerify = expected.slice(-MAX_QUESTIONS);
   const stored = readBank();
+  if (stored.length !== expected.length) {
+    throw new StorageError(
+      `Lagringskontroll feilet: forventet ${expected.length} spørsmål, men fant ${stored.length} lagret.`
+    );
+  }
   const storedIds = new Set(stored.map(q => q.id));
-  const missing = toVerify.filter(q => !storedIds.has(q.id));
+  const missing = expected.filter(q => !storedIds.has(q.id));
   if (missing.length > 0) {
     throw new StorageError(
-      `Lagringskontroll feilet: ${missing.length} av ${toVerify.length} spørsmål kunne ikke verifiseres lagret.`
+      `Lagringskontroll feilet: ${missing.length} av ${expected.length} spørsmål kunne ikke verifiseres lagret.`
     );
   }
 }
@@ -287,13 +371,29 @@ export function getQuestions(): Question[] {
 export interface AddResult {
   added: number;
   duplicates: number;
-  /** Spørsmål som ble avvist (allerede finnes). */
+  /** Spørsmål som ble avvist på grunn av kapasitetsgrensen. */
+  capacityRejected: number;
+  /** Spørsmål som ble avvist (allerede finnes eller ugyldig). */
   rejectedQuestions: Question[];
 }
 
+/** Generer en unik ID når den opprinnelige kolliderer med eksisterende spørsmål. */
+function makeUniqueId(baseId: string, existingIds: Set<string>, batchIds: Set<string>): string {
+  let counter = 1;
+  let candidateId = `${baseId}-${counter}`;
+  while (existingIds.has(candidateId) || batchIds.has(candidateId)) {
+    counter++;
+    candidateId = `${baseId}-${counter}`;
+  }
+  return candidateId;
+}
+
 /**
- * Legg til spørsmål i banken. Duplikater (samme normaliserte tekst) avvises.
- * Returnerer hvor mange som ble lagt til og hvor mange som var duplikater.
+ * Legg til spørsmål i banken.
+ * - Duplikater (samme normaliserte tekst) avvises.
+ * - ID-kollisjoner håndteres: samme tekst = duplikat, ulik tekst = ny unik ID.
+ * - Kapasitetsgrensen overholdes: import som ville overskride avvises med tydelig feil.
+ * Returnerer detaljert resultat med antall lagt til, duplikater og kapasitetsavvisninger.
  */
 export function addQuestions(
   questions: Question[],
@@ -302,10 +402,22 @@ export function addQuestions(
 ): AddResult {
   initQuestionBank();
   const bank = readBank();
+
+  // A1: Avvis import som ville overskride kapasitetsgrensen
+  if (bank.length + questions.length > MAX_QUESTIONS) {
+    throw new StorageError(
+      `Import avvist: ${bank.length} spørsmål finnes allerede i banken (maks ${MAX_QUESTIONS}). ` +
+        `${questions.length} nye spørsmål ville overskride kapasitetsgrensen med ${bank.length + questions.length - MAX_QUESTIONS} spørsmål. ` +
+        `Eksporter spørsmålsbanken (Spørsmålsbank → Eksporter), slett uønskede spørsmål, og prøv igjen.`
+    );
+  }
+
   const existingTexts = new Set(bank.map(q => normalizeText(q.text)));
+  const existingIds = new Set(bank.map(q => q.id));
   const now = new Date().toISOString();
   const added: StoredQuestion[] = [];
   const rejected: Question[] = [];
+  const batchIds = new Set<string>();
 
   for (const q of questions) {
     const textKey = normalizeText(q.text);
@@ -313,11 +425,35 @@ export function addQuestions(
       rejected.push(q);
       continue;
     }
+
+    // A2: Håndter ID-kollisjoner konsistent
+    let finalId = q.id && q.id !== '' ? q.id : stableQuestionId(source, q.text);
+
+    // Sjekk om IDen allerede finnes i banken med ANNEN tekst
+    const existingWithId = bank.find(bq => bq.id === finalId);
+    if (existingWithId) {
+      if (normalizeText(existingWithId.text) === textKey) {
+        // Samme ID + samme tekst = duplikat (defensivt, burde ha vært fanget over)
+        rejected.push(q);
+        continue;
+      }
+      // Samme ID + ulik tekst = kollisjon → generer unik ID
+      finalId = makeUniqueId(finalId, existingIds, batchIds);
+    }
+
+    // Sjekk kollisjon innen samme importbatch
+    if (batchIds.has(finalId)) {
+      finalId = makeUniqueId(finalId, existingIds, batchIds);
+    }
+
     existingTexts.add(textKey);
+    existingIds.add(finalId);
+    batchIds.add(finalId);
+
     const categories = migrateCategories(q.categories ?? []);
     added.push({
       ...q,
-      id: q.id && q.id !== '' ? q.id : stableQuestionId(source, q.text),
+      id: finalId,
       categories,
       source,
       sourceRef,
@@ -330,7 +466,12 @@ export function addQuestions(
   if (added.length > 0) {
     writeBank([...bank, ...added]);
   }
-  return { added: added.length, duplicates: rejected.length, rejectedQuestions: rejected };
+  return {
+    added: added.length,
+    duplicates: rejected.length,
+    capacityRejected: 0,
+    rejectedQuestions: rejected,
+  };
 }
 
 /** Oppdater ett spørsmål. Returnerer false hvis ID ikke finnes. */

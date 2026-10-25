@@ -45,6 +45,8 @@ export interface QuizPreset {
   questionCount: number;
   categoryWeights: Record<string, number>;
   rounds: GameRound[];
+  /** Brukerdefinert tema, f.eks. "dinosaurer" eller "romfart". */
+  customTheme?: string;
 }
 
 export interface GameRound {

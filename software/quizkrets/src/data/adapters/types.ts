@@ -16,6 +16,8 @@ export interface ProviderFetchParams {
   difficulty?: Difficulty;
   /** 'multiple' = flervalg, 'boolean' = sant/usant. Utelatt = alle typer. */
   questionType?: 'multiple' | 'boolean';
+  /** Emneknapper/tags fra leverandøren. Utelatt = alle. */
+  tags?: string[];
 }
 
 /** En kategori hos leverandøren, mappet til intern kategori. */

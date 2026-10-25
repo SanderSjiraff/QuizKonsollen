@@ -52,13 +52,14 @@ describe('csvToDrafts (P1 #9: radvis validering i stedet for total-kast)', () =>
     expect(invalid[0].issues[0]).toMatch(/Ugyldig fasit-bokstav "x"/);
   });
 
-  it('fasit som peker på ikke-eksisterende alternativ avvises', () => {
-    // correct=c, men kun to valg (a, b)
+  it('fasit som peker på et tomt alternativ avvises med tydelig forklaring', () => {
+    // correct=c, men kun to valg (a, b) – choice_c er tom
     const csv = `${HEADER}\nHvor mange kontinenter?;multiple_choice;lett;geografi;c;en;to;`;
     const { drafts, invalid } = csvToDrafts(parseCsv(csv));
     expect(drafts).toHaveLength(0);
     expect(invalid).toHaveLength(1);
-    expect(invalid[0].issues[0]).toMatch(/Ugyldig fasit-bokstav "c"/);
+    expect(invalid[0].issues[0]).toMatch(/tomt svaralternativ/i);
+    expect(invalid[0].issues[0]).toMatch(/choice_c/i);
   });
 
   it('manglende correct-kolonne gir avviste rader med forklaring, ikke kast', () => {

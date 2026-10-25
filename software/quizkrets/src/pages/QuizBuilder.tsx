@@ -1,10 +1,9 @@
-import { useMemo } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Play, Save, Users, Zap, Check, Gauge, Timer,
-  AlertTriangle, CheckCircle2, ChevronDown,
+  AlertTriangle, CheckCircle2, ChevronDown, Sparkles, X,
 } from 'lucide-react';
-import { useState } from 'react';
 import type { GameConfig, SelectionError } from '../hooks/useGameEngine';
 import {
   getMainCategories,
@@ -13,6 +12,8 @@ import {
 } from '../core/categories';
 import { PLAYER_COLORS } from '../data/mockData';
 import { buildTeams } from '../core/teams';
+import { matchTheme } from '../core/themeMatcher';
+import { AutoQuestionFetcher, type FetchProgress } from '../services/autoQuestionFetcher';
 import SelectionErrorDialog from '../components/SelectionErrorDialog';
 import type { Difficulty, GameMode, Player } from '../types';
 
@@ -71,12 +72,52 @@ export default function QuizBuilder({
 }: QuizBuilderProps) {
   const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
 
+  // === Custom theme + AutoFetch state ===
+  const [customThemeInput, setCustomThemeInput] = useState(config.customTheme ?? '');
+  const [themeMatchResult, setThemeMatchResult] = useState<ReturnType<typeof matchTheme> | null>(null);
+  const [autoFetchProgress, setAutoFetchProgress] = useState<FetchProgress | null>(null);
+  const [isAutoFetching, setIsAutoFetching] = useState(false);
+  const [fetchCompleteTick, setFetchCompleteTick] = useState(0);
+  const autoFetcherRef = useRef<AutoQuestionFetcher | null>(null);
+  const lastMatchRef = useRef<string>('');
+
   const mainCategories = getMainCategories();
   const difficulties = config.selectedDifficulties as Difficulty[];
 
-  /** Total tilgjengelighet for hele utvalget. */
+  /** Effektive kategorier: customTheme matcher overstyrer manuell valg. */
+  const effectiveCategories = useMemo(() => {
+    if (config.customTheme && themeMatchResult?.internalCategories.length) {
+      return themeMatchResult.internalCategories;
+    }
+    return config.selectedCategories;
+  }, [config.customTheme, themeMatchResult, config.selectedCategories]);
+
+  /** Debounced matching av custom theme. */
+  useEffect(() => {
+    if (!customThemeInput.trim()) {
+      setThemeMatchResult(null);
+      if (config.customTheme) updateConfig({ customTheme: undefined });
+      return;
+    }
+    const timer = setTimeout(() => {
+      const result = matchTheme(customThemeInput);
+      setThemeMatchResult(result);
+      lastMatchRef.current = customThemeInput;
+      updateConfig({ customTheme: customThemeInput.trim() });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [customThemeInput]);
+
+  // Synkroniser fra config ved mount (hvis quizen har lagret customTheme)
+  useEffect(() => {
+    if (config.customTheme && config.customTheme !== customThemeInput) {
+      setCustomThemeInput(config.customTheme);
+    }
+  }, []);
+
+  /** Tilgjengelighet basert på effektive kategorier og vanskelighetsgrader. */
   const availability = getAvailability({
-    categories: config.selectedCategories,
+    categories: effectiveCategories,
     difficulties,
     count: config.questionCount,
   });
@@ -139,13 +180,53 @@ export default function QuizBuilder({
     updateConfig({ players, teams: buildTeams(players) });
   };
 
-  const summaryChips = useMemo(
-    () =>
-      config.selectedCategories.length > 0
-        ? config.selectedCategories.map(getCategoryName)
-        : ['Alle kategorier'],
-    [config.selectedCategories]
-  );
+  const summaryChips = useMemo(() => {
+    if (config.customTheme) {
+      return [`Tema: ${config.customTheme}`];
+    }
+    return config.selectedCategories.length > 0
+      ? config.selectedCategories.map(getCategoryName)
+      : ['Alle kategorier'];
+  }, [config.customTheme, config.selectedCategories]);
+
+  // === AutoFetch handlers ===
+  const handleAutoFetch = async () => {
+    setIsAutoFetching(true);
+    setAutoFetchProgress(null);
+
+    if (!autoFetcherRef.current) {
+      autoFetcherRef.current = new AutoQuestionFetcher();
+    }
+
+    const criteria = {
+      categories: effectiveCategories,
+      difficulties,
+      count: config.questionCount,
+      customTheme: config.customTheme,
+    };
+
+    try {
+      const result = await autoFetcherRef.current.fetchMissing(criteria, (progress) => {
+        setAutoFetchProgress(progress);
+      });
+
+      setIsAutoFetching(false);
+      setFetchCompleteTick(t => t + 1); // Tving re-rendring slik at availability oppdateres
+      if (result.success) {
+        // Oppdater autoFetchProgress med endelig status, men IKKE start quizen automatisk
+        // Brukeren klikker "Start quiz" selv når de er fornøyd
+      }
+    } catch {
+      setIsAutoFetching(false);
+      setFetchCompleteTick(t => t + 1);
+    }
+  };
+
+  const handleCancelAutoFetch = () => {
+    autoFetcherRef.current?.cancel();
+    setIsAutoFetching(false);
+    setAutoFetchProgress(null);
+  };
 
   return (
     <div className="min-h-screen p-6 md:p-10">
@@ -246,6 +327,142 @@ export default function QuizBuilder({
                   </div>
                 );
               })}
+            </div>
+
+            {/* === Custom Theme Input === */}
+            <div className="mt-5 pt-5 border-t border-border">
+              <label className="block text-text-secondary font-semibold mb-2 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-primary" />
+                Skriv inn et eget tema
+              </label>
+              <input
+                type="text"
+                value={customThemeInput}
+                onChange={e => setCustomThemeInput(e.target.value)}
+                placeholder="f.eks. dinosaurer, romfart, fotball..."
+                className="w-full bg-bg-elevated border border-border rounded-xl px-4 py-3 text-text-primary focus:border-primary focus:outline-none"
+                aria-label="Eget tema"
+              />
+
+              {/* Theme match result */}
+              {themeMatchResult && customThemeInput.trim() && (
+                <div className="mt-3 space-y-2">
+                  {themeMatchResult.recognized ? (
+                    <>
+                      <div className="flex items-center gap-2 text-sm">
+                        <CheckCircle2 className="w-4 h-4 text-success" />
+                        <span className="text-text-secondary">
+                          Gjenkjent: <strong className="text-text-primary">{themeMatchResult.displayName}</strong>
+                        </span>
+                      </div>
+                      {themeMatchResult.internalCategories.length > 0 && (
+                        <p className="text-text-muted text-xs">
+                          Kategorier: {themeMatchResult.internalCategories.map(getCategoryName).join(', ')}
+                        </p>
+                      )}
+                      {themeMatchResult.externalTags.length > 0 && (
+                        <p className="text-text-muted text-xs">
+                          Tilgjengelig fra nettet via tagger: {themeMatchResult.externalTags.join(', ')}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex items-start gap-2 text-sm">
+                      <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+                      <span className="text-text-secondary">
+                        {themeMatchResult.message}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* AutoFetch status / progress */}
+              <AnimatePresence>
+                {isAutoFetching && autoFetchProgress && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 8 }}
+                    className="mt-4 rounded-xl bg-bg-elevated border border-border p-4 space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-primary flex items-center gap-2">
+                        <Sparkles className="w-4 h-4" />
+                        {autoFetchProgress.status === 'complete'
+                          ? 'Henting fullført'
+                          : autoFetchProgress.status === 'error'
+                          ? 'Henting feilet'
+                          : autoFetchProgress.status === 'insufficient'
+                          ? 'Utilstrekkelig antall'
+                          : 'Henter spørsmål…'}
+                      </span>
+                      <span className="text-text-secondary text-sm">
+                        {autoFetchProgress.localFound} lokalt + {autoFetchProgress.fetchedCount} hentet = {autoFetchProgress.totalReady} klare
+                      </span>
+                    </div>
+
+                    {/* Fremdriftsbar */}
+                    <div className="w-full bg-bg-card rounded-full h-2.5 overflow-hidden">
+                      <motion.div
+                        className="h-full bg-primary rounded-full"
+                        initial={{ width: 0 }}
+                        animate={{
+                          width: `${Math.min(
+                            100,
+                            (autoFetchProgress.totalReady / Math.max(1, autoFetchProgress.localTarget)) * 100
+                          )}%`,
+                        }}
+                        transition={{ duration: 0.3 }}
+                      />
+                    </div>
+
+                    <p className="text-text-secondary text-sm">{autoFetchProgress.message}</p>
+
+                    {autoFetchProgress.errors.length > 0 && (
+                      <div className="text-error text-sm space-y-1">
+                        {autoFetchProgress.errors.map((err, i) => (
+                          <p key={i}>• {err}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleCancelAutoFetch}
+                      className="w-full py-2 rounded-xl border-2 border-error bg-error/10 text-error font-semibold flex items-center justify-center gap-2 hover:bg-error/20 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                      Avbryt
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Når det er customTheme og IKKE nok lokale spørsmål: vis auto-fetch-knapp */}
+              {config.customTheme && !enoughAvailable && !isAutoFetching && (
+                <div className="mt-4 space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-text-secondary">
+                    <AlertTriangle className="w-4 h-4 text-warning" />
+                    <span>
+                      Bare {availability.fresh} lokale spørsmål matcher "{config.customTheme}".
+                      {availability.withReuse >= config.questionCount
+                        ? ` ${availability.withReuse} med gjenbruk.`
+                        : ''}
+                    </span>
+                  </div>
+                  {availability.withReuse < config.questionCount && (
+                    <button
+                      onClick={handleAutoFetch}
+                      className="w-full py-3 rounded-xl border-2 border-primary bg-primary/10 text-primary font-semibold flex items-center justify-center gap-2 hover:bg-primary/20 transition-colors"
+                    >
+                      <Sparkles className="w-5 h-5" />
+                      Hent flere spørsmål automatisk
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Custom theme + nok spørsmål: grønn start-knapp-variant i oppsummering håndteres videre */}
             </div>
           </div>
 

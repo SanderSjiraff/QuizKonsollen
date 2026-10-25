@@ -65,6 +65,7 @@ function App() {
                     bonusForSpeed: game.config.bonusForSpeed,
                   },
                 ],
+                customTheme: game.config.customTheme,
               };
               saveQuizPreset(preset);
             }}

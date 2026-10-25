@@ -74,6 +74,8 @@ export interface GameConfig {
   bonusForSpeed: boolean;
   players: Player[];
   teams: Team[];
+  /** Brukerdefinert tema (f.eks. "dinosaurer", "romfart"). */
+  customTheme?: string;
 }
 
 export interface StartGameOptions {

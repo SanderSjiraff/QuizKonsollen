@@ -2,6 +2,35 @@
 
 ## Siste endringer
 
+### v1.3 – AutoFetchService + customTheme
+
+1. **AutoFetchService integrert i QuizBuilder**
+   - Nytt "Skriv inn et eget tema"-tekstfelt nederst i kategoriseksjonen
+   - Debounced matching mot `matchTheme()` fra `themeMatcher`
+   - Viser resultat: antall lokale matcher, om det er hentbart fra API
+   - Når lokale spørsmål mangler: automatisk henting via `AutoQuestionFetcher`
+   - Fremdrifts-UI med fremdriftsbar og feilmeldinger
+   - "Avbryt"-knapp som kaller `.cancel()`
+
+2. **GameConfig utvidet med `customTheme`**
+   - `customTheme?: string` lagres i GameConfig
+   - Bevares ved quiz-start via `configUpdates`
+
+3. **QuizPreset utvidet med `customTheme`**
+   - `customTheme` bevares ved lagring og lasting av quizer
+   - `presetToConfigUpdates` overfører `customTheme` fra preset til config
+
+4. **Playwright E2E-tester for AutoFetch**
+   - `tests/autofetch.spec.ts`: 5 nye E2E-tester
+   - Automatisk innhenting når lokale spørsmål mangler (mock API via `page.route()`)
+   - Egendefinert tema som finnes i tags vs. ikke gjenkjent
+   - Offline: bruk lokale spørsmål
+   - Lagring/gjenoppretting av customTheme
+   - Avbryt-knapp stopper auto-fetch
+
+5. **GitHub Actions CI/CD**
+   - `.github/workflows/test.yml` – kjører build + unit-test + Playwright E2E på push/PR
+
 ### Kvalitetssikring (v1.1 → v1.2): P1-spillflyt/datakvalitet og P2-UI
 
 Alle endringer nedenfor er verifisert med TDD (RED→GRØNN) og full test-suite.
@@ -98,10 +127,11 @@ Alle endringer nedenfor er verifisert med TDD (RED→GRØNN) og full test-suite.
 
 ```bash
 # Enhetstester (Vitest)
-npm run test                    # 130 tester, alle grønne
+npm run test                    # 166 tester, alle grønne
 
 # E2E-tester (Playwright)
 npx playwright test tests/quizkrets.spec.ts   # 25 tester, alle grønne
+npx playwright test tests/autofetch.spec.ts   # 5 tester, alle grønne
 
 # Produksjonsbygg
 npm run build                   # Vite, OK
@@ -117,6 +147,11 @@ gjenbruk.
 
 | Fil | Ansvar |
 |-----|--------|
+| `src/services/autoQuestionFetcher.ts` | Automatisk henting av spørsmål fra API |
+| `src/core/themeMatcher.ts` | Matching av brukerdefinerte temaer mot kategorier/tags |
+| `src/pages/QuizBuilder.tsx` | Quiz-konfigurasjon med customTheme + AutoFetch UI |
+| `src/hooks/useGameEngine.ts` | Spilltilstand og logikk, GameConfig med customTheme |
+| `src/data/savedQuizzes.ts` | Lagring/lasting av quizer med customTheme |
 | `src/core/gameSession.ts` | Svarregistrering, poeng, spilletid |
 | `src/core/scoring.ts` | Statistikk, poengberegning, `statsBarFractions` |
 | `src/core/questionSelector.ts` | Spørsmålsuttrekk, vekting, gjenbruk |

@@ -168,6 +168,9 @@ export const triviaApiProvider: QuestionProvider = {
     if (params.difficulty) {
       url.searchParams.set('difficulties', DIFFICULTY_TO_API[params.difficulty]);
     }
+    if (params.tags && params.tags.length > 0) {
+      url.searchParams.set('tags', params.tags.join(','));
+    }
     // API-et leverer kun flervalgsspørsmål av typen text_choice/hybrid;
     // sant/usant filtreres bort lokalt dersom etterspurt.
     if (params.questionType === 'boolean') {

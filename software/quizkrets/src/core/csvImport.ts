@@ -63,6 +63,10 @@ export function parseCsv(text: string): string[][] {
 /**
  * Konverter CSV-rader (med overskrift) til spørsmålskladder.
  * Ugyldige rader samles i `invalid` – de kaster ikke lenger hele importen.
+ * 
+ * VIKTIG: Kolonneposisjon bevares for svaralternativer. Tomme felter ignoreres
+ * IKKE under posisjonsmapping – fasiten peker på en spesifikk kolonne (a–f).
+ * Hvis fasiten peker på et tomt alternativ, avvises raden.
  */
 export function csvToDrafts(rows: string[][]): CsvParseResult {
   const drafts: unknown[] = [];
@@ -77,26 +81,67 @@ export function csvToDrafts(rows: string[][]): CsvParseResult {
       const col = idx(name);
       return col >= 0 ? (row[col] ?? '').trim() : '';
     };
-    const choicesRaw = CHOICE_COLUMNS.map(get).filter(t => t !== '');
-    if (choicesRaw.length === 0 && !get('text')) return;
 
+    const text = get('text');
     const correctLetter = get('correct').toLowerCase();
-    const choices = choicesRaw.map((text, j) => ({ id: LETTERS[j], text }));
-    const correctIdx = LETTERS.indexOf(correctLetter);
-    const hasValidCorrect = correctIdx >= 0 && correctIdx < choices.length;
 
-    if (!hasValidCorrect) {
+    // Tom rad uten tekst og valg ignoreres stille
+    if (!text) {
+      const hasAnyChoice = CHOICE_COLUMNS.some(c => get(c) !== '');
+      if (!hasAnyChoice) return;
+    }
+
+    // Bygg svaralternativer med OPPRINNELIG kolonneposisjon
+    const choices: { id: string; text: string }[] = [];
+    const choiceTexts: string[] = [];
+    for (let colIdx = 0; colIdx < CHOICE_COLUMNS.length; colIdx++) {
+      const choiceText = get(CHOICE_COLUMNS[colIdx]);
+      if (choiceText) {
+        choices.push({ id: LETTERS[colIdx], text: choiceText });
+        choiceTexts.push(choiceText.toLowerCase());
+      }
+    }
+
+    if (choices.length === 0) {
+      // Rad med tekst men ingen valg er ugyldig
+      if (text) {
+        invalid.push({
+          preview: text || `Rad ${i + 2}`,
+          issues: ['Ingen svaralternativer funnet.'],
+        });
+      }
+      return;
+    }
+
+    // Sjekk at fasitbokstaven er gyldig (a–f)
+    const correctIdx = LETTERS.indexOf(correctLetter);
+    if (correctIdx < 0) {
       invalid.push({
-        preview: get('text') || `Rad ${i + 2}`,
+        preview: text || `Rad ${i + 2}`,
         issues: [
-          `Ugyldig fasit-bokstav "${correctLetter}" – må være a–f og peke på et eksisterende svaralternativ.`,
+          `Ugyldig fasit-bokstav "${get('correct')}" – må være a–f.`,
+        ],
+      });
+      return;
+    }
+
+    // VIKTIG: Sjekk at fasiten peker på en KOLONNE som faktisk har innhold
+    // Hvis choice_b er tom og correct = b, peker fasiten på et tomt felt
+    const correctColName = CHOICE_COLUMNS[correctIdx];
+    const correctColValue = get(correctColName);
+    if (!correctColValue) {
+      invalid.push({
+        preview: text || `Rad ${i + 2}`,
+        issues: [
+          `Fasit-bokstav "${get('correct')}" peker på et tomt svaralternativ (kolonne ${correctColName}). ` +
+          `Fyll inn tekst i kolonnen, eller endre fasiten til et gyldig alternativ.`,
         ],
       });
       return;
     }
 
     drafts.push({
-      text: get('text'),
+      text,
       type: get('type') || (choices.length === 2 ? 'true_false' : 'multiple_choice'),
       difficulty: get('difficulty') || 'lett',
       categories: get('categories')
@@ -106,7 +151,7 @@ export function csvToDrafts(rows: string[][]): CsvParseResult {
             .filter(Boolean)
         : [],
       choices,
-      correctChoiceIds: [LETTERS[correctIdx]],
+      correctChoiceIds: [correctLetter],
       explanation: get('explanation') || undefined,
     });
   });

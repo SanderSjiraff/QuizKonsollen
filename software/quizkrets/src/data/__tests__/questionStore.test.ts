@@ -78,6 +78,7 @@ import {
   getQuestionsNeedingReview,
   initQuestionBank,
   StorageError,
+  MAX_QUESTIONS,
   type StoredQuestion,
 } from '../questionStore';
 import type { Question } from '../../types';
@@ -246,18 +247,18 @@ describe('Lagringssikkerhet (P0): aldri automatisk sletting ved feil', () => {
   });
 
   it('oppdatering og sletting kaster ved kvotefeil uten å endre data', () => {
-    addQuestions([makeQuestion('q1', 'Opprinnelig tekst')], 'manual');
+    addQuestions([makeQuestion('test-oppdatering-1', 'Opprinnelig tekst')], 'manual');
     const bankFør = storage.getItem(BANK_KEY);
 
     storage.failNextSet(quotaError());
-    expect(() => updateQuestion('q1', { text: 'Endret tekst' })).toThrow(StorageError);
+    expect(() => updateQuestion('test-oppdatering-1', { text: 'Endret tekst' })).toThrow(StorageError);
 
     storage.failNextSet(quotaError());
-    expect(() => deleteQuestion('q1')).toThrow(StorageError);
+    expect(() => deleteQuestion('test-oppdatering-1')).toThrow(StorageError);
 
     expect(storage.getItem(BANK_KEY)).toBe(bankFør);
     // Opprinnelig tekst er fortsatt i banken
-    expect(getAllQuestions().some(q => q.id === 'q1' && q.text === 'Opprinnelig tekst')).toBe(true);
+    expect(getAllQuestions().some(q => q.text === 'Opprinnelig tekst')).toBe(true);
   });
 
   it('migrering ved full kvote: krasjer ikke, flagg settes IKKE, legacy og bank bevares', () => {
@@ -318,5 +319,138 @@ describe('Lagringssikkerhet (P0): aldri automatisk sletting ved feil', () => {
     expect(getAllQuestions().some(q => q.text === 'Legacy som skal migreres')).toBe(true);
     // Legacy-nøkkelen er ryddet bort etter verifisert lagring
     expect(storage.getItem(LEGACY_KEY)).toBeNull();
+  });
+});
+
+describe('A1 – Kapasitetsgrense: ingen stille sletting', () => {
+  it('avviser import som ville overskride MAX_QUESTIONS (5000)', () => {
+    storage.clear();
+    // Seed-data migreres ved initQuestionBank() – sjekk faktisk antall
+    const seedCount = getAllQuestions().length;
+    const remaining = MAX_QUESTIONS - seedCount;
+    // Fyll banken opp til maks
+    const existing = Array.from({ length: remaining }, (_, i) =>
+      makeQuestion(`fylle-${i}`, `Fyllespørsmål ${i}`)
+    );
+    const r = addQuestions(existing, 'manual');
+    expect(r.added).toBe(remaining);
+
+    // Banken er nå full – ny import skal avvises
+    expect(getAllQuestions().length).toBe(MAX_QUESTIONS);
+    expect(() => addQuestions([makeQuestion('over', 'Over grensen')], 'manual')).toThrow(
+      StorageError
+    );
+
+    // Eksisterende data er uendret
+    expect(getAllQuestions().length).toBe(MAX_QUESTIONS);
+  });
+
+  it('feilmelding ved full bank er forståelig og nevner eksport', () => {
+    storage.clear();
+    const seedCount = getAllQuestions().length;
+    const remaining = MAX_QUESTIONS - seedCount;
+    const existing = Array.from({ length: remaining }, (_, i) =>
+      makeQuestion(`fylle-${i}`, `Fyllespørsmål ${i}`)
+    );
+    addQuestions(existing, 'manual');
+
+    try {
+      addQuestions([makeQuestion('over', 'Over grensen')], 'manual');
+      expect.unreachable('Skulle kastet StorageError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StorageError);
+      const msg = (e as Error).message;
+      expect(msg).toMatch(/maks 5000/);
+      expect(msg).toMatch(/5000/);
+      expect(msg).toMatch(/eksporter/i);
+    }
+  });
+});
+
+describe('A2 – Unike stabile ID-er', () => {
+  it('samme ID med identisk tekst = duplikat (avvises)', () => {
+    const q1 = makeQuestion('unik-id-a2', 'Spørsmål med unik ID');
+    const r1 = addQuestions([q1], 'manual');
+    expect(r1.added).toBe(1);
+
+    // Samme ID, samme tekst
+    const q2 = makeQuestion('unik-id-a2', 'Spørsmål med unik ID');
+    const r2 = addQuestions([q2], 'manual');
+    expect(r2.added).toBe(0);
+    expect(r2.duplicates).toBe(1);
+  });
+
+  it('samme ID med ulik tekst = ny unik ID genereres', () => {
+    const q1 = makeQuestion('kollider-id', 'Første spørsmål');
+    const r1 = addQuestions([q1], 'manual');
+    expect(r1.added).toBe(1);
+
+    // Samme ID, men ulik tekst – skal IKKE avvises, men få ny ID
+    const q2 = makeQuestion('kollider-id', 'Andre spørsmål med annen tekst');
+    const r2 = addQuestions([q2], 'manual');
+    expect(r2.added).toBe(1);
+    expect(r2.duplicates).toBe(0);
+
+    const all = getAllQuestions().filter(q =>
+      q.text === 'Første spørsmål' || q.text === 'Andre spørsmål med annen tekst'
+    );
+    expect(all).toHaveLength(2);
+    // ID-ene skal være forskjellige
+    expect(all[0].id).not.toBe(all[1].id);
+  });
+
+  it('ID-kollisjon innen samme batch løses med unik ID', () => {
+    // To spørsmål med samme ID men ulik tekst i samme import
+    const q1 = makeQuestion('batch-kollider', 'Første batch-spørsmål');
+    const q2 = makeQuestion('batch-kollider', 'Andre batch-spørsmål');
+    const r = addQuestions([q1, q2], 'manual');
+    expect(r.added).toBe(2);
+    expect(r.duplicates).toBe(0);
+
+    const all = getAllQuestions().filter(q =>
+      q.text.includes('batch-spørsmål')
+    );
+    expect(all).toHaveLength(2);
+    expect(new Set(all.map(q => q.id)).size).toBe(2); // Unike ID-er
+  });
+});
+
+describe('A6 – Beskyttelse mot korrupte lagringsdata', () => {
+  it('ingen data returnerer tom bank uten feil', () => {
+    storage.clear();
+    const all = getAllQuestions();
+    expect(all.length).toBeGreaterThan(0); // seed-data migreres
+  });
+
+  it('gyldig tom bank (tom array) fungerer', () => {
+    storage.clear();
+    storage.setItem('quizkrets_question_bank_v1', '[]');
+    // seed-data migreres inn, så banken får spørsmål
+    const all = getAllQuestions();
+    expect(all.length).toBeGreaterThan(0);
+  });
+
+  it('korrupt JSON kaster StorageError i stedet for å tolke som tom bank', () => {
+    storage.setItem('quizkrets_question_bank_v1', '{ikke gyldig json');
+    expect(() => getAllQuestions()).toThrow(StorageError);
+  });
+
+  it('ikke-array data kaster StorageError', () => {
+    storage.setItem('quizkrets_question_bank_v1', '{"ikke": "array"}');
+    expect(() => getAllQuestions()).toThrow(StorageError);
+  });
+
+  it('korrupt data-feilmelding inneholder instruks om eksport og gjenoppretting', () => {
+    storage.setItem('quizkrets_question_bank_v1', 'helt ugyldig');
+    try {
+      getAllQuestions();
+      expect.unreachable('Skulle kastet StorageError');
+    } catch (e) {
+      expect(e).toBeInstanceOf(StorageError);
+      const msg = (e as Error).message;
+      expect(msg).toMatch(/ugyldig JSON/i);
+      expect(msg).toMatch(/backup/i);
+      expect(msg).toMatch(/eksporter/i);
+    }
   });
 });

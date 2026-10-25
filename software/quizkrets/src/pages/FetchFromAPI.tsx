@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft, Download, Globe, AlertCircle, Check, Loader2,
-  Database, Trash2, BarChart3, Wifi, WifiOff, Clock,
+  Database, Trash2, BarChart3, Wifi, WifiOff, Clock, Sparkles,
 } from 'lucide-react';
 import { openTdbProvider } from '../data/adapters/openTdbAdapter';
 import { triviaApiProvider } from '../data/adapters/triviaApiAdapter';
@@ -10,6 +10,7 @@ import type { QuestionProvider } from '../data/adapters/types';
 import { addQuestions, getBankStats, deleteBySource, getAllQuestions, normalizeText, StorageError } from '../data/questionStore';
 import { getCategoryName } from '../core/categories';
 import type { Question, Difficulty } from '../types';
+import { AutoQuestionFetcher, type FetchProgress } from '../services/autoQuestionFetcher';
 
 interface FetchFromAPIProps {
   onBack: () => void;
@@ -47,6 +48,11 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [rateWait, setRateWait] = useState(0);
 
+  // Auto-fetch state
+  const [autoFetchProgress, setAutoFetchProgress] = useState<FetchProgress | null>(null);
+  const autoFetcherRef = useRef<AutoQuestionFetcher | null>(null);
+  const [autoFetching, setAutoFetching] = useState(false);
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -65,6 +71,11 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
     }, 500);
     return () => clearInterval(interval);
   }, [provider]);
+
+  // Oppdater stats ved mount
+  useEffect(() => {
+    setStats(getBankStats());
+  }, []);
 
   const handleFetch = async () => {
     if (!isOnline) {
@@ -120,7 +131,6 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
       setPreviewDuplicates(new Set());
       onImportComplete();
     } catch (error) {
-      // Lagringsfeil: banken er uendret – vis meldingen (inkl. eksport-hint).
       setError(
         error instanceof StorageError
           ? error.message
@@ -142,6 +152,53 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
       );
     }
   };
+
+  // ===== AUTO FETCH =====
+  const handleAutoFetch = useCallback(async () => {
+    if (!isOnline) {
+      setError('Du er offline. Koble til internett for å hente spørsmål.');
+      return;
+    }
+
+    setAutoFetching(true);
+    setError(null);
+    setSuccess(null);
+    setAutoFetchProgress(null);
+
+    if (!autoFetcherRef.current) {
+      autoFetcherRef.current = new AutoQuestionFetcher();
+    }
+
+    const criteria = {
+      categories: selectedCategory ? [selectedCategory] : [],
+      difficulties: (difficulty ? [difficulty] : ['lett', 'middels', 'vanskelig']) as Difficulty[],
+      count: amount,
+    };
+
+    try {
+      const result = await autoFetcherRef.current.fetchMissing(criteria, (progress) => {
+        setAutoFetchProgress(progress);
+      });
+
+      setStats(getBankStats());
+
+      if (result.success) {
+        setSuccess(`Auto-henting fullført! ${result.totalReady} spørsmål klare.`);
+      } else {
+        setError(`Auto-henting: ${result.errors.join(', ') || 'Utilstrekkelig antall spørsmål'}`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Ukjent feil ved auto-henting.');
+    } finally {
+      setAutoFetching(false);
+    }
+  }, [isOnline, selectedCategory, difficulty, amount]);
+
+  const handleCancelAutoFetch = useCallback(() => {
+    autoFetcherRef.current?.cancel();
+    setAutoFetching(false);
+    setAutoFetchProgress(null);
+  }, []);
 
   return (
     <div className="min-h-screen p-6 md:p-10">
@@ -299,8 +356,8 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
             </div>
           </div>
 
-          {/* Hent-knapp med rate-limit-info */}
-          <div className="px-6 pb-6">
+          {/* Hent-knapper */}
+          <div className="px-6 pb-6 space-y-3">
             <button
               onClick={handleFetch}
               disabled={loading || !isOnline}
@@ -318,7 +375,31 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
                 </>
               )}
             </button>
-            {rateWait > 0 && !loading && (
+
+            {/* Auto-fetch knapp */}
+            <button
+              onClick={autoFetching ? handleCancelAutoFetch : handleAutoFetch}
+              disabled={!isOnline}
+              className={`w-full text-lg py-3 flex items-center justify-center gap-3 rounded-xl border-2 font-semibold transition-all disabled:opacity-50 ${
+                autoFetching
+                  ? 'border-error bg-error/20 text-error'
+                  : 'border-primary/50 bg-primary/10 text-primary hover:bg-primary/20'
+              }`}
+            >
+              {autoFetching ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  Avbryt auto-henting
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5" />
+                  Smart auto-henting
+                </>
+              )}
+            </button>
+
+            {rateWait > 0 && !loading && !autoFetching && (
               <p className="text-text-muted text-sm mt-2 text-center flex items-center justify-center gap-1">
                 <Clock className="w-4 h-4" />
                 Rate-limit: klar om {rateWait} sekunder
@@ -326,6 +407,62 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
             )}
           </div>
         </motion.div>
+
+        {/* Auto-fetch fremdrift */}
+        <AnimatePresence>
+          {autoFetchProgress && (
+            <motion.div
+              initial={{ y: -10, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: -10, opacity: 0 }}
+              className="card border-primary/30"
+            >
+              <div className="p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-primary flex items-center gap-2">
+                    <Sparkles className="w-5 h-5" />
+                    {autoFetchProgress.status === 'complete'
+                      ? 'Auto-henting fullført'
+                      : autoFetchProgress.status === 'error'
+                      ? 'Auto-henting feilet'
+                      : autoFetchProgress.status === 'insufficient'
+                      ? 'Utilstrekkelig antall'
+                      : 'Auto-henter spørsmål…'}
+                  </span>
+                  <span className="text-text-secondary text-sm">
+                    {autoFetchProgress.localFound} lokalt + {autoFetchProgress.fetchedCount} hentet ={' '}
+                    {autoFetchProgress.totalReady} klare
+                  </span>
+                </div>
+
+                {/* Fremdriftsbar */}
+                <div className="w-full bg-bg-elevated rounded-full h-3 overflow-hidden">
+                  <motion.div
+                    className="h-full bg-primary rounded-full"
+                    initial={{ width: 0 }}
+                    animate={{
+                      width: `${Math.min(
+                        100,
+                        (autoFetchProgress.totalReady / Math.max(1, autoFetchProgress.localTarget)) * 100
+                      )}%`,
+                    }}
+                    transition={{ duration: 0.3 }}
+                  />
+                </div>
+
+                <p className="text-text-secondary text-sm">{autoFetchProgress.message}</p>
+
+                {autoFetchProgress.errors.length > 0 && (
+                  <div className="text-error text-sm space-y-1">
+                    {autoFetchProgress.errors.map((err, i) => (
+                      <p key={i}>• {err}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Meldinger */}
         <AnimatePresence>
@@ -486,6 +623,7 @@ export default function FetchFromAPI({ onBack, onImportComplete }: FetchFromAPIP
             <li>• <strong>The Trivia API:</strong> gratis for ikke-kommersiell bruk (CC BY-NC 4.0). Maks 20 kall per 5 sekunder. Stabile spørsmåls-IDer.</li>
             <li>• Spørsmålene er på engelsk og lagres lokalt for offline-bruk.</li>
             <li>• Kildehenvisning lagres med hvert spørsmål og vises i spørsmålsbanken.</li>
+            <li>• <strong>Smart auto-henting</strong> sjekker lokal bank først, henter manglende spørsmål fra flere kilder, og respekterer rate-limits.</li>
           </ul>
         </motion.div>
       </div>

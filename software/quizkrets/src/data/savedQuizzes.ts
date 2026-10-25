@@ -31,10 +31,17 @@ export function presetToConfigUpdates(preset: QuizPreset): Partial<GameConfig> {
     pointsPerWrong: round?.pointsPerWrong ?? 0,
     bonusForSpeed: round?.bonusForSpeed ?? false,
     categoryWeights: preset.categoryWeights ?? {},
+    customTheme: preset.customTheme,
   };
 }
 
-export function saveQuizPreset(preset: QuizPreset): void {
+export interface SaveQuizResult {
+  ok: boolean;
+  message: string;
+  error?: string;
+}
+
+export function saveQuizPreset(preset: QuizPreset): SaveQuizResult {
   try {
     const saved = getSavedQuizzes();
     const existingIndex = saved.findIndex(q => q.id === preset.id);
@@ -54,8 +61,18 @@ export function saveQuizPreset(preset: QuizPreset): void {
     }
     
     localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+    return {
+      ok: true,
+      message: existingIndex >= 0 ? 'Quiz oppdatert.' : 'Quiz lagret.',
+    };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('Kunne ikke lagre quiz:', error);
+    return {
+      ok: false,
+      message: 'Kunne ikke lagre quiz.',
+      error: `Lagringsfeil: ${errorMessage}`,
+    };
   }
 }
 
