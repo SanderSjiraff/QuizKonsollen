@@ -77,7 +77,7 @@ export default function QuizBuilder({
   const [themeMatchResult, setThemeMatchResult] = useState<ReturnType<typeof matchTheme> | null>(null);
   const [autoFetchProgress, setAutoFetchProgress] = useState<FetchProgress | null>(null);
   const [isAutoFetching, setIsAutoFetching] = useState(false);
-  const [fetchCompleteTick, setFetchCompleteTick] = useState(0);
+  const [, setFetchCompleteTick] = useState(0); // Tvinger re-rendring etter autofetch (verdien leses aldri)
   const autoFetcherRef = useRef<AutoQuestionFetcher | null>(null);
   const lastMatchRef = useRef<string>('');
 
