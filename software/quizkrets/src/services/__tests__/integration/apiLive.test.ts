@@ -17,7 +17,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
  * - Trivia API: max 50 per kall (ikke relevant ved 3).
  */
 
-const SHOULD_RUN = process.env.QUIZKRETS_INTEGRATION_TEST === '1';
+// @ts-ignore – process finnes i node/Vitest-miljø, ikke i Vite-bygg/browser
+const SHOULD_RUN =
+  (globalThis as any).process?.env?.QUIZKRETS_INTEGRATION_TEST === '1';
 const SKIP_MESSAGE = 'Skipper — sett miljøvariabel QUIZKRETS_INTEGRATION_TEST=1 for å kjøre';
 
 describe('Integrasjontest: live API', () => {

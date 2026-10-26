@@ -157,12 +157,17 @@ export function useGameEngine() {
       difficulties: Difficulty[];
       count?: number;
     }): { fresh: number; withReuse: number } => {
-      return countAvailable(getQuestions(), {
-        categories: criteria.categories,
-        difficulties: criteria.difficulties,
-        count: criteria.count ?? 0,
-        excludeIds: [...getUsedQuestionIds()],
-      });
+      try {
+        return countAvailable(getQuestions(), {
+          categories: criteria.categories,
+          difficulties: criteria.difficulties,
+          count: criteria.count ?? 0,
+          excludeIds: [...getUsedQuestionIds()],
+        });
+      } catch (err) {
+        console.error('getAvailability feilet:', err);
+        return { fresh: 0, withReuse: 0 };
+      }
     },
     []
   );
@@ -176,59 +181,70 @@ export function useGameEngine() {
    */
   const startGame = useCallback(
     (options?: StartGameOptions): boolean => {
-      setSelectionError(null);
+      try {
+        setSelectionError(null);
 
-      // Slå sammen config-overstyringer FØR uttrekk (unngår stale state).
-      const effectiveConfig = options?.configUpdates
-        ? { ...config, ...options.configUpdates }
-        : config;
+        // Slå sammen config-overstyringer FØR uttrekk (unngår stale state).
+        const effectiveConfig = options?.configUpdates
+          ? { ...config, ...options.configUpdates }
+          : config;
 
-      // P1 #7: Sikre at lagstrukturen alltid stemmer uansett startpunkt
-      // (quizbygger, lagret quiz, tilfeldig quiz). Ved lag-modus bygges
-      // lagene alltid på nytt fra gjeldende spillere – dette respekterer
-      // ev. teamId satt i quizbyggeren og fanger opp spillerendringer i
-      // GameSetup. Ved andre moduser er teams alltid tom.
-      const configWithTeams: GameConfig = {
-        ...effectiveConfig,
-        teams: effectiveConfig.gameMode === 'team' ? buildTeams(effectiveConfig.players) : [],
-      };
-      setConfig(configWithTeams);
-
-      let selected: Question[];
-      if (options?.questions && options.questions.length > 0) {
-        selected = options.questions;
-      } else {
-        const criteria: SelectionCriteria & { weights?: Record<string, number> } = {
-          categories: effectiveConfig.selectedCategories,
-          difficulties: effectiveConfig.selectedDifficulties as Difficulty[],
-          count: effectiveConfig.questionCount,
-          excludeIds: [...getUsedQuestionIds()],
-          allowReuse: options?.allowReuse ?? false,
+        // P1 #7: Sikre at lagstrukturen alltid stemmer uansett startpunkt
+        // (quizbygger, lagret quiz, tilfeldig quiz). Ved lag-modus bygges
+        // lagene alltid på nytt fra gjeldende spillere – dette respekterer
+        // ev. teamId satt i quizbyggeren og fanger opp spillerendringer i
+        // GameSetup. Ved andre moduser er teams alltid tom.
+        const configWithTeams: GameConfig = {
+          ...effectiveConfig,
+          teams: effectiveConfig.gameMode === 'team' ? buildTeams(effectiveConfig.players) : [],
         };
-        const hasWeights = effectiveConfig.categoryWeights &&
-          Object.keys(effectiveConfig.categoryWeights).length > 0 &&
-          effectiveConfig.selectedCategories.length > 0;
-        const result: SelectionResult = hasWeights
-          ? selectDistributed(getQuestions(), { ...criteria, weights: effectiveConfig.categoryWeights })
-          : selectQuestions(getQuestions(), criteria);
-        if (!result.ok) {
-          setSelectionError({
-            requested: result.requested,
-            available: result.availableCount,
-            missing: result.missing,
-            availableWithReuse: result.availableWithReuse,
-          });
-          return false;
-        }
-        selected = result.questions;
-      }
+        setConfig(configWithTeams);
 
-      sessionRef.current = new GameSession();
-      setAnswerVersion(v => v + 1);
-      setQuestions(selected);
-      setCurrentQuestionIndex(0);
-      setScreen('lobby');
-      return true;
+        let selected: Question[];
+        if (options?.questions && options.questions.length > 0) {
+          selected = options.questions;
+        } else {
+          const criteria: SelectionCriteria & { weights?: Record<string, number> } = {
+            categories: effectiveConfig.selectedCategories,
+            difficulties: effectiveConfig.selectedDifficulties as Difficulty[],
+            count: effectiveConfig.questionCount,
+            excludeIds: [...getUsedQuestionIds()],
+            allowReuse: options?.allowReuse ?? false,
+          };
+          const hasWeights = effectiveConfig.categoryWeights &&
+            Object.keys(effectiveConfig.categoryWeights).length > 0 &&
+            effectiveConfig.selectedCategories.length > 0;
+          const result: SelectionResult = hasWeights
+            ? selectDistributed(getQuestions(), { ...criteria, weights: effectiveConfig.categoryWeights })
+            : selectQuestions(getQuestions(), criteria);
+          if (!result.ok) {
+            setSelectionError({
+              requested: result.requested,
+              available: result.availableCount,
+              missing: result.missing,
+              availableWithReuse: result.availableWithReuse,
+            });
+            return false;
+          }
+          selected = result.questions;
+        }
+
+        sessionRef.current = new GameSession();
+        setAnswerVersion(v => v + 1);
+        setQuestions(selected);
+        setCurrentQuestionIndex(0);
+        setScreen('lobby');
+        return true;
+      } catch (err) {
+        console.error('startGame feilet:', err);
+        setSelectionError({
+          requested: config.questionCount,
+          available: 0,
+          missing: config.questionCount,
+          availableWithReuse: 0,
+        });
+        return false;
+      }
     },
     [config]
   );
