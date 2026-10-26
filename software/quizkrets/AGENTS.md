@@ -9,7 +9,21 @@
    - **Kritisk fix**: Ikke lenger teller alle lokale spørsmål (f.eks. generell-kunnskap) som matcher når det er et egendefinert tema uten intern kategori-mapping (f.eks. «Dinosaurer»)
    - Fetch trigges korrekt når tag-tilknytting, men ingen interne spørsmål finnes
 
-2. **_buildProviderParams via matchTheme**
+6. **Crash-sikring ved korrupt localStorage (A6-utvidelse)**
+   - `getAvailability` i `useGameEngine.ts`: try-catch rundt `getQuestions()`
+     → returnerer `{fresh:0, withReuse:0}` ved `StorageError` i stedet for blank
+     skjerm.
+   - `startGame` i `useGameEngine.ts`: try-catch med fallback
+     `selectionError` → appen krasjer aldri; brukeren ser dialog med
+     «utilstrekkelig bank».
+   - `questionStore.ts`: opprettholder `StorageError`-kontrakten (A6-tester
+     uendret) — feilen håndteres av kaller, ikke skjules på kilde.
+
+7. **Integrasjonstest mot live API**
+   - `src/services/__tests__/integration/apiLive.test.ts` (valgfri).
+   - 4 tester: OpenTDB format, OpenTDB rate-limit (429), The Trivia API med
+     tags (dinosaurs), ukjent tag → tomt array (ikke 500).
+   - Kjøres kun med `QUIZKRETS_INTEGRATION_TEST=1` — ikke-blokkerende.
    - Sender `externalTags` fra `matchTheme()` til Trivia API (ikke rå brukerstreng)
    - «Dinosaurer» → `dinosaurs`, «The Beatles» → `the_beatles`
    - «historie» → intern kategori (providerCategory), ingen tags
